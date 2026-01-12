@@ -1,0 +1,8 @@
+{
+    "name": "Additional Search Options",
+    "unique_id": "uchideshi34.AdditionalSearchOptions",
+    "version": "1.3.1",
+    "author": "uchideshi34",
+    "description": "Add feature to search patterns, terrain and walls",
+    "dd_version": "1.2.0.1",
+}
