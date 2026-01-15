@@ -20,16 +20,17 @@ var _lib_mod_config
 var store_last_valid_selection = null
 
 const UNIQUE_ID = "uchideshi34.AdditionalSearchOptions"
+const TOOL_LOOKUP = {"Patterns": "PatternShapeTool", "Walls": "WallTool", "Portals": "PortalTool", "Lights": "LightTool","Roofs": "RoofTool"}
 
-var MAX_HISTORY_SEARCH_TERMS = 10
+var max_history_search_terms = 10
 
 # Logging Functions
 const ENABLE_LOGGING = true
-const LOGGING_LEVEL = 0
+var logging_level = 0
 
 func outputlog(msg,level=0):
 	if ENABLE_LOGGING:
-		if level <= LOGGING_LEVEL:
+		if level <= logging_level:
 			printraw("(%d) <AdditionalSearchOptions>: " % OS.get_ticks_msec())
 			print(msg)
 	else:
@@ -751,8 +752,6 @@ func on_terrain_rh_panel_button_pressed(value):
 		ui_config[category_type][tool_name]["rh_panel"].Align.remove_child(ui_config[category_type][tool_name]["section"])
 		terrain_tool_panel.Align.add_child(ui_config[category_type][tool_name]["section"])
 
-
-
 # Hide the search bar unless the "Used" tab is open
 func on_object_filter_button_toggled(new_state):
 	var category_type = "Objects"
@@ -785,7 +784,8 @@ func on_toolpanel_visibility_changed(tool_type: String):
 				timer.start(0.05)
 				yield(timer,"timeout")
 				# Emit the signal so that it tells DD that the object panel should be filtered by the search entry
-				ui_config["Objects"]["Main"]["dd_search_entry"].emit_signal("text_entered",ui_config["Objects"]["Main"]["dd_search_entry"].text)
+				if ui_config["Objects"]["Main"].has("dd_search_entry"):
+					ui_config["Objects"]["Main"]["dd_search_entry"].emit_signal("text_entered",ui_config["Objects"]["Main"]["dd_search_entry"].text)
 	
 	Global.Editor.get_node("Windows").remove_child(timer)
 	timer.queue_free()
@@ -880,11 +880,7 @@ func make_search_ui(tool_panel, category_type: String, tool_name: String):
 		vbox = tool_panel.Align
 		# Look for the grid menu in the tool panel
 		if category_type != "Terrain":
-			for thing in vbox.get_children():
-				# If the node is a grid menu then it should be the right thing
-				if thing is ItemList:
-					ui_config[category_type][tool_name]["grid_menu"] = thing
-					break
+			ui_config[category_type][tool_name]["grid_menu"] = Global.Editor.Tools[TOOL_LOOKUP[category_type]].Controls["Texture"]
 		# If this is a terrain tool then we need to make a few more things in particular a grid menu
 		else:
 			# Make an option button to activate search UI
@@ -1106,21 +1102,28 @@ func make_search_history_for_tool_ui(category_type: String, tool_name: String):
 	var search_hbox = null
 	var search_lineedit = null
 
-	# Finf the search hbox containers
-	match category_type:
-		"Objects":
-			search_hbox = Global.Editor.ObjectLibraryPanel.filters.find_node("Search")
-		"Paths":
-			search_hbox = Global.Editor.PathLibraryPanel.filters.find_node("Search")
-		_:
-			return
+	if category_type in ["Objects","Paths"]:
+		# Ignore select requests for objects and paths and the library and search entry is common
+		if tool_name == "Select": return
+		# Finf the search hbox containers
+		match category_type:
+			"Objects":
+				search_hbox = Global.Editor.ObjectLibraryPanel.filters.find_node("Search")
+			"Paths":
+				search_hbox = Global.Editor.PathLibraryPanel.filters.find_node("Search")
+			_:
+				return
 
-	# Find the nodes for the in built search box and line edit
-	if search_hbox == null:
-		return
-	# Look for the search line edit
-	search_lineedit = search_hbox.find_node("SearchLineEdit")
-	ui_config[category_type][tool_name]["dd_search_entry"] = search_lineedit
+		# Find the nodes for the in built search box and line edit
+		if search_hbox == null:
+			return
+		# Look for the search line edit
+		search_lineedit = search_hbox.find_node("SearchLineEdit")
+		ui_config[category_type][tool_name]["dd_search_entry"] = search_lineedit
+	else:
+		search_hbox = ui_config[category_type][tool_name]["hbox"]
+		search_lineedit = ui_config[category_type][tool_name]["search_entry"]
+
 
 	if search_hbox != null && search_lineedit != null:
 		make_search_history_ui(category_type, tool_name, search_hbox, search_lineedit)
@@ -1179,7 +1182,7 @@ func on_store_new_search_history_item(search_text: String, menubutton: MenuButto
 	move_item_to_top_of_popupmenu(history_popup.get_item_count()-1,history_popup)
 
 	# Limit the number of history records to MAX_HISTORY_SEARCH_TERMS
-	if history_popup.get_item_count() > MAX_HISTORY_SEARCH_TERMS + 1:
+	if history_popup.get_item_count() > max_history_search_terms:
 		history_popup.remove_item(history_popup.get_item_count()-1)
 
 
@@ -1220,111 +1223,64 @@ func move_item_to_top_of_popupmenu(id: int, popupmenu: PopupMenu):
 
 #########################################################################################################
 ##
-## REGISTER ACTIONS FUNCTION
+## APPLY PREFERENCES FUNCTION
 ##
 #########################################################################################################
 
-# Function to register an action for left mouse click
-func register_right_mouse_click_action():
+func on_preferences_apply_pressed():
 
-	var event = InputEventMouseButton.new()
+	outputlog("on_preferences_apply_pressed")
 
-	event.pressed = true
-	event.button_index = BUTTON_RIGHT #Right mouse button
+	var timer = Timer.new()
+	timer.autostart = false
+	timer.one_shot = true
+	Global.Editor.get_node("Windows").add_child(timer)
 
-	if not InputMap.has_action("right_mouse_click"):
-		InputMap.add_action("right_mouse_click",0.5)
-		InputMap.action_add_event("right_mouse_click", event)
-
-#########################################################################################################
-##
-## INPUT CAPTURE FUNCTIONS
-##
-#########################################################################################################
-
-# Function to respond to unhandled mouse events
-func on_unhandled_mouse_event(event):
-
-	outputlog("on_unhandled_mouse_event",4)
-
-
-# Function to respond to unhandled key events
-func on_unhandled_key_event(event):
-
-	outputlog("on_unhandled_key_event",4)
-
-# Function to set up the 
-func set_up_input_capture():
-	var unhandledeventemitter = UnhandledEventEmitter.new()
-	unhandledeventemitter.global = Global
-	Global.World.add_child(unhandledeventemitter)
-	unhandledeventemitter.connect("key_input", self, "on_unhandled_key_event")
-	unhandledeventemitter.connect("mouse_input", self, "on_unhandled_mouse_event")
-
-# Class to emit unhandled events
-class UnhandledEventEmitter extends Node:
-
-	var global = null
-
-	signal key_input
-	signal mouse_input
-
-	func _unhandled_input(event):
-
-		if not global.Editor.SearchHasFocus:
-			var focus = global.Editor.GetFocus()
-			if focus == null || (not focus is LineEdit && not focus is Tree):
-				if event is InputEventKey:
-					self.emit_signal("key_input", event)
+	timer.start(0.5)
+	yield(timer,"timeout")
 	
-	func _input(event):
+	max_history_search_terms = int(_lib_mod_config.search_entries_slider)
+	logging_level = int(_lib_mod_config.core_log_level)
 
-		if not global.Editor.SearchHasFocus:
-			var focus = global.Editor.GetFocus()
-			if focus == null || (not focus is LineEdit && not focus is Tree):
-				if event is InputEventMouse:
-					self.emit_signal("mouse_input", event)
-
-
+	Global.Editor.get_node("Windows").remove_child(timer)
+	timer.queue_free()
 
 #########################################################################################################
 ##
-## UPDATE FUNCTION
+## VERSION CHECKER FUNCTIONS
 ##
 #########################################################################################################
 
+# Check whether a semver strng 2 is greater than string one. Only works on simple comparisons - DO NOT USE THIS FUNCTION OUTSIDE THIS CONTEXT
+func compare_semver(semver1: String, semver2: String) -> bool:
 
-# On selection changed
-func selection_changed():
+	outputlog("compare_semver: semver1: " + str(semver1) + " semver2" + str(semver2),2)
+	var semver1data = get_semver_data(semver1)
+	var semver2data = get_semver_data(semver2)
 
-	outputlog("selection_changed",2)
+	if semver1data == null || semver2data == null : return false
 
-	if Global.Editor.Tools["SelectTool"].Selected.size() > 0:
-		if get_node_type(Global.Editor.Tools["SelectTool"].Selected[0]) == "portals":
-			outputlog("texture: " + str(Global.Editor.Tools["SelectTool"].Selected[0].Texture.resource_path),2)
+	if semver1data["major"] != semver2data["major"]:
+		return semver1data["major"] < semver2data["major"]
+	if semver1data["minor"] != semver2data["minor"]:
+		return semver1data["minor"] < semver2data["minor"]
+	if semver1data["patch"] != semver2data["patch"]:
+		return semver1data["major"] < semver2data["major"]
+	
+	return false
 
+# Parse the semver string
+func get_semver_data(semver: String):
 
+	var data = {}
 
-# Function to check if the selection has changed
-func has_selection_changed() -> bool:
+	if semver.split(".").size() < 3: return null
 
-	outputlog("has_selection_changed: " + str(Global.Editor.Tools["SelectTool"].Selected),4)
-
-	# Check if it has changed from the stored version and update it if it has changed
-	if not is_the_same(store_last_valid_selection, Global.Editor.Tools["SelectTool"].Selected):
-		store_last_valid_selection = Global.Editor.Tools["SelectTool"].Selected
-		return true
-	else:
-		return false
-
-func update(_delta):
-
-	# A new node has been added since we last checked
-	if Global.Editor.ActiveToolName == "SelectTool":
-		# If the selection has changed then call the selection changed function
-		if has_selection_changed():
-			selection_changed()
-
+	return {
+		"major": int(semver.split(".")[0]),
+		"minor": int(semver.split(".")[1]),
+		"patch": int(semver.split(".")[2].split("-")[0])
+	}
 
 #########################################################################################################
 ##
@@ -1332,6 +1288,10 @@ func update(_delta):
 ##
 #########################################################################################################
 
+# Function to update the config label
+func update_config_label(value, label: Label):
+
+	label.text =  "%0d" % value
 
 # Main Script
 func start() -> void:
@@ -1357,8 +1317,41 @@ func start() -> void:
 		var _lib_config_builder = Global.API.ModConfigApi.create_config()
 		_lib_config_builder\
 			.check_button("search_on_text_changed", true, "Enable search on any text changed without requiring carriage return.")\
-			.check_button("refresh_grid_colours", false, "Refresh the wall and pattern colours in the grid when searching.")
+			.check_button("refresh_grid_colours", false, "Refresh the wall and pattern colours in the grid when searching.")\
+			.h_box_container().enter()\
+				.label("Max Search Entries: ")\
+				.label().ref("slider_label")\
+				.label(" ")\
+				.h_slider("search_entries_slider",10)\
+					.with("max_value",30)\
+					.with("min_value",1)\
+					.with("step",1)\
+					.connect_current("loaded", self, "update_config_label", [_lib_config_builder.get_ref("slider_label")])\
+					.connect_current("value_changed", self, "update_config_label", [_lib_config_builder.get_ref("slider_label")])\
+					.size_flags_h(Control.SIZE_EXPAND_FILL)\
+					.size_flags_v(Control.SIZE_FILL)\
+			.exit()\
+			.h_box_container().enter()\
+				.label("Core Log Level ")\
+				.option_button("core_log_level", 0, ["0","1","2","3","4"])\
+			.exit()
 		_lib_mod_config = _lib_config_builder.build()
+		max_history_search_terms = int(_lib_mod_config.search_entries_slider)
+		update_config_label(max_history_search_terms,_lib_config_builder.get_ref("slider_label"))
+
+		# Link to the pressed field so we can update the search terms and logging
+		Global.API.PreferencesWindowApi.connect("apply_pressed", self, "on_preferences_apply_pressed")
+				
+		logging_level = int(_lib_mod_config.core_log_level)
+		var _lib_mod_meta = Global.API.ModRegistry.get_mod_info("CreepyCre._Lib").mod_meta
+		if _lib_mod_meta != null:
+			if compare_semver("1.1.2", _lib_mod_meta["version"]):
+				var update_checker = Global.API.UpdateChecker
+				
+				update_checker.register(Global.API.UpdateChecker.builder()\
+														.fetcher(update_checker.github_fetcher("uchideshi34", "AdditionalSearchOptions"))\
+														.downloader(update_checker.github_downloader("uchideshi34", "AdditionalSearchOptions"))\
+														.build())
 	
 	# Set references to the Select Tool for later use
 	select_tool_panel = Global.Editor.Toolset.GetToolPanel("SelectTool")
@@ -1399,20 +1392,8 @@ func start() -> void:
 	for tool_type in ["ObjectTool","ScatterTool"]:
 		Global.Editor.Toolset.ToolPanels[tool_type].connect("visibility_changed",self, "on_toolpanel_visibility_changed",[tool_type])
 
-	make_search_history_for_tool_ui("Objects", "Main")
-	make_search_history_for_tool_ui("Paths", "Main")
-
-	
-
-
-
-
-
-
-
-
-
-
-
-
-	
+	for category_type in ["Patterns", "Objects", "Paths", "Walls", "Lights", "Terrain", "Roofs", "Portals"]:
+		for tool_name in ["Main","Select"]:
+			if tool_name == "Select" && category_type in ["Terrain","Roofs","Objects","Paths"]:
+				continue
+			make_search_history_for_tool_ui(category_type, tool_name)
