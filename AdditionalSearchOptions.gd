@@ -225,7 +225,12 @@ func on_clear_button_pressed(category_type: String, tool_name: String):
 
 	# Reload the pattern types in turn
 	if category_type == "Objects":
-		on_used_objects_reset()
+		if Global.Editor.ObjectLibraryPanel.tagsButton.pressed:
+			# Rest the list
+			if Global.Editor.ActiveToolName in ["ObjectTool", "ScatterTool"]:
+				Global.Editor.TagsPanels[Global.Editor.ActiveToolName].ShowCurrentTagSet()
+		if Global.Editor.ObjectLibraryPanel.usedButton.pressed:
+			on_used_objects_reset()
 	else:
 		ui_config[category_type][tool_name]["grid_menu"].Reset()
 		# If this is a portal search and we are in the main tool, the PostInit() function will add back the null portal
@@ -336,7 +341,7 @@ func on_new_search_text(search_text: String, category_type: String, tool_name: S
 	var category: String
 	var thumbnail_url
 
-	outputlog("on_new_search_text: " + str(search_text) + " category_type: " + str(category_type) + " tool_name: " + str(tool_name))
+	outputlog("on_new_search_text: " + str(search_text) + " category_type: " + str(category_type) + " tool_name: " + str(tool_name),2)
 
 	# If we have installed _Lib check for the search_on_text_changed status
 	if Engine.has_signal("_lib_register_mod"):
@@ -363,7 +368,18 @@ func on_new_search_text(search_text: String, category_type: String, tool_name: S
 	
 	# Get a list of all possible assets in the right category
 	if category_type == "Objects":
-		array_textures = find_assets_used_in_map(category_type, category, category_type,ui_config[category_type][tool_name]["sort_type"])
+		if Global.Editor.ObjectLibraryPanel.tagsButton.pressed:
+			# Rest the list
+			if Global.Editor.ActiveToolName in ["ObjectTool", "ScatterTool"]:
+				Global.Editor.TagsPanels[Global.Editor.ActiveToolName].ShowCurrentTagSet()
+
+			# Get the current keys
+			array_textures = Global.Editor.ObjectLibraryPanel.objectMenu.Lookup.keys()
+			array_textures.sort()
+			array_textures.invert()
+
+		if Global.Editor.ObjectLibraryPanel.usedButton.pressed:
+			array_textures = find_assets_used_in_map(category_type, category, category_type,ui_config[category_type][tool_name]["sort_type"])
 	else:
 		array_textures = Script.GetAssetList(category)
 	
@@ -398,7 +414,6 @@ func on_new_search_text(search_text: String, category_type: String, tool_name: S
 	refresh_colours_in_grid_menu(category_type,tool_name)
 
 	outputlog("finished show set",2)
-
 
 # Function to update the grid menu to list all the assets previously used on this map (all levels)
 func on_used_assets_button_pressed(category_type: String, tool_name: String, source_category: String):
@@ -642,8 +657,6 @@ func find_assets_used_in_map(category_type: String, category: String, source_cat
 
 	return array_of_texture_paths
 
-
-
 #########################################################################################################
 ##
 ## UI DRIVEN FUNCTIONS
@@ -753,17 +766,54 @@ func on_terrain_rh_panel_button_pressed(value):
 		terrain_tool_panel.Align.add_child(ui_config[category_type][tool_name]["section"])
 
 # Hide the search bar unless the "Used" tab is open
-func on_object_filter_button_toggled(new_state):
+func on_object_filter_button_toggled(button_pressed: bool, button: Button):
+
+	outputlog("on_object_filter_button_toggled",2)
 	var category_type = "Objects"
 	var tool_name = "Main"
 
-	if Global.Editor.ObjectLibraryPanel.usedButton.pressed:
-		ui_config[category_type][tool_name]["hbox"].visible = true
-	elif Global.Editor.ObjectLibraryPanel.tagsButton.pressed:
-		ui_config[category_type][tool_name]["hbox"].visible = false
-	else:
-		ui_config[category_type][tool_name]["hbox"].visible = false
+	if button_pressed:
+		match button:
+			Global.Editor.ObjectLibraryPanel.usedButton:
+				for button in ui_config[category_type][tool_name]["sort_type_buttons"]:
+					button.visible = true
+
+				ui_config[category_type][tool_name]["hbox"].visible = true
+				refresh_object_search_after_delay()
+				
+			Global.Editor.ObjectLibraryPanel.tagsButton:
+				for button in ui_config[category_type][tool_name]["sort_type_buttons"]:
+					button.visible = false
+				ui_config[category_type][tool_name]["hbox"].visible = true
+				refresh_object_search_after_delay()
+			_:
+				ui_config[category_type][tool_name]["hbox"].visible = false
+		
 	
+# After a delay re-run the object search based on current value of search entry
+func refresh_object_search_after_delay(delay: float = 0.1):
+
+	outputlog("refresh_object_search_after_delay",2)
+
+	var category_type = "Objects"
+	var tool_name = "Main"
+	var timer = Timer.new()
+	timer.autostart = false
+	timer.one_shot = true
+	Global.Editor.get_node("Windows").add_child(timer)
+
+	timer.start(delay)
+	yield(timer,"timeout")
+	on_new_search_text(ui_config[category_type][tool_name]["search_entry"].text, category_type, tool_name, "text_entered")
+
+	Global.Editor.get_node("Windows").remove_child(timer)
+	timer.queue_free()
+
+func on_tagspanel_multi_selected(_ignore_this, _ignore_this_too):
+
+	outputlog("on_tagspanel_multi_selected",2)
+
+	refresh_object_search_after_delay()
 
 # If the visibility is true
 func on_toolpanel_visibility_changed(tool_type: String):
@@ -1082,10 +1132,10 @@ func make_search_ui_used_objects():
 	ui_config[category_type][tool_name]["search_entry"].connect("focus_entered",self,"on_search_entry_changed_focus", [true])
 
 	# Listen to the toggles on all, used and tags buttons in order to show the search bar or not
-	Global.Editor.ObjectLibraryPanel.allButton.connect("toggled", self, "on_object_filter_button_toggled")
-	Global.Editor.ObjectLibraryPanel.usedButton.connect("toggled", self, "on_object_filter_button_toggled")
-	Global.Editor.ObjectLibraryPanel.tagsButton.connect("toggled", self, "on_object_filter_button_toggled")
-	on_object_filter_button_toggled(true)
+	Global.Editor.ObjectLibraryPanel.allButton.connect("toggled", self, "on_object_filter_button_toggled",[Global.Editor.ObjectLibraryPanel.allButton])
+	Global.Editor.ObjectLibraryPanel.usedButton.connect("toggled", self, "on_object_filter_button_toggled",[Global.Editor.ObjectLibraryPanel.usedButton])
+	Global.Editor.ObjectLibraryPanel.tagsButton.connect("toggled", self, "on_object_filter_button_toggled",[Global.Editor.ObjectLibraryPanel.tagsButton])
+	on_object_filter_button_toggled(true, Global.Editor.ObjectLibraryPanel.allButton)
 
 
 #########################################################################################################
@@ -1391,9 +1441,12 @@ func start() -> void:
 	# Check for the launch of the Object or Scatter Tool and refresh the Used
 	for tool_type in ["ObjectTool","ScatterTool"]:
 		Global.Editor.Toolset.ToolPanels[tool_type].connect("visibility_changed",self, "on_toolpanel_visibility_changed",[tool_type])
+		Global.Editor.TagsPanels[tool_type].tagsList.connect("multi_selected", self, "on_tagspanel_multi_selected")
 
 	for category_type in ["Patterns", "Objects", "Paths", "Walls", "Lights", "Terrain", "Roofs", "Portals"]:
 		for tool_name in ["Main","Select"]:
 			if tool_name == "Select" && category_type in ["Terrain","Roofs","Objects","Paths"]:
 				continue
 			make_search_history_for_tool_ui(category_type, tool_name)
+	
+
