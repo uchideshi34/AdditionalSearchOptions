@@ -682,6 +682,40 @@ func find_assets_used_in_map(tool_type: String, source_category: String, sort_ty
 
 #########################################################################################################
 ##
+## TERRAIN SPECIFIC FUNCTIONS
+##
+#########################################################################################################
+
+# If we press the set terrain button, then set the terrain slot texture based on the grid value selected and the slot in the drop down
+func on_set_terrain_slot_button_pressed():
+
+	var category_type = "TerrainBrush"
+	var tool_name = "main"
+	var texture = ui_config[category_type][tool_name]["grid_menu"].Selected
+	var terrain_list = Global.Editor.Tools["TerrainBrush"].terrainList
+
+	var index = Global.Editor.Tools["TerrainBrush"].TerrainID
+	
+	# If we have a valid texture selected then set it
+	if texture:
+
+		# Get the details of the terrain's thumbnail so we can update the UI
+		var thumbnail_path = find_thumbnail_url(texture.resource_path)
+		if thumbnail_path != null:
+		
+			var thumbnail_name = texture.resource_path.split("/")[-1].split(".")[0]
+			var thumbnail_texture = ResourceLoader.load(thumbnail_path)
+
+			# Update the visuals of the terrain brush tool to reflect the change we have made
+			terrain_list.set_item_text(index,thumbnail_name)
+			terrain_list.set_item_icon(index,thumbnail_texture)
+			terrain_list.set_item_tooltip(index,thumbnail_name)
+
+			# Set the texture on the map itself
+			Global.World.GetCurrentLevel().Terrain.SetTexture(texture, index)
+
+#########################################################################################################
+##
 ## UI DRIVEN FUNCTIONS
 ##
 #########################################################################################################
@@ -818,10 +852,24 @@ func make_search_ui(tool_type: String, location: String):
 	# Find grid menu reference
 	# If we are looking to construct the main panel search
 	if location == "main":
-		# vbox is the main tool panel align vbox
-		vbox = tool_panel.Align
-		# Look for the grid menu in the tool panel
-		ui_config[tool_type][location]["grid_menu"] = Global.Editor.Tools[tool_type].Controls["Texture"]
+		if tool_type != "TerrainBrush":
+			# vbox is the main tool panel align vbox
+			vbox = tool_panel.Align
+			# Look for the grid menu in the tool panel
+			ui_config[tool_type][location]["grid_menu"] = Global.Editor.Tools[tool_type].Controls["Texture"]
+		else:
+			# Begin a section that will get hidden if the option button is not selected
+			ui_config[tool_type][location]["section"] = tool_panel.BeginSection(true)
+			# Make a button to set the terrain slot
+			ui_config[tool_type][location]["set_button"] = tool_panel.CreateButton("Set Terrain Slot", "res://ui/icons/tools/terrain_brush.png")
+			ui_config[tool_type][location]["set_button"].connect("pressed",self,"on_set_terrain_slot_button_pressed")
+			# Make a grid menu
+			ui_config[tool_type][location]["grid_menu"] = tool_panel.CreateTextureGridMenu("TerrainTextureGridID","Terrain",true)
+			ui_config[tool_type][location]["grid_menu"].ShowsPreview = false
+			tool_panel.EndSection()
+
+			ui_config[tool_type][location]["section"].visible = true
+			vbox = ui_config[tool_type][location]["section"]
 
 	# Or if we are looking at the Select tool
 	elif location == "select":
@@ -838,10 +886,15 @@ func make_search_ui(tool_type: String, location: String):
 	# Create search entry reference
 	ui_config[tool_type][location]["search_entry"] = LineEdit.new()
 
-	# Make the hbox search entry with a label, the lineedit and a clear button
-	used_button.icon = ResourceLoader.load("res://ui/icons/tools/map_settings.png")
-	used_button.hint_tooltip = "Load the set of " + str(tool_type.rstrip("s").to_lower()) + " textures already used on this map."
-	used_button.connect("pressed",self,"on_used_assets_button_pressed",[tool_type,location,tool_type])
+	if tool_type == "TerrainBrush":
+		used_button.icon = ResourceLoader.load("res://ui/icons/tools/pattern_shape_tool.png")
+		used_button.hint_tooltip = "Load (where possible) the set of pattern textures matching the terrain textures already used on this map."
+		used_button.connect("pressed",self,"on_used_assets_button_pressed",[tool_type,location,"PatternShapeTool"])
+	else:
+		# Make the hbox search entry with a label, the lineedit and a clear button
+		used_button.icon = ResourceLoader.load("res://ui/icons/tools/map_settings.png")
+		used_button.hint_tooltip = "Load the set of " + str(tool_type.rstrip("s").to_lower()) + " textures already used on this map."
+		used_button.connect("pressed",self,"on_used_assets_button_pressed",[tool_type,location,tool_type])
 
 	# Configure the clear button with its icon & tooltip
 	clear_button.icon = icon_texture
@@ -1297,6 +1350,7 @@ func start() -> void:
 	make_search_ui("LightTool", "select")
 	make_search_ui("RoofTool", "main")
 	make_search_ui("PortalTool", "main")
+	make_search_ui("TerrainBrush", "main")
 
 	make_search_ui_used_objects()
 	make_search_ui_used_paths()
@@ -1310,9 +1364,9 @@ func start() -> void:
 
 	Global.Editor.Toolset.ToolPanels["TerrainBrush"].connect("visibility_changed",self, "setup_terrain_window")
 
-	for tool_type in ["PatternShapeTool", "ObjectTool", "PathTool", "WallTool", "LightTool", "RoofTool", "PortalTool"]:
+	for tool_type in ["PatternShapeTool", "ObjectTool", "PathTool", "WallTool", "LightTool", "RoofTool", "PortalTool", "TerrainBrush"]:
 		for location in ["main","select"]:
-			if location == "select" && tool_type in ["RoofTool","ObjectTool","PathTool"]:
+			if location == "select" && tool_type in ["RoofTool","ObjectTool","PathTool","TerrainBrush"]:
 				continue
 			make_search_history_for_tool_ui(tool_type, location)
 	
