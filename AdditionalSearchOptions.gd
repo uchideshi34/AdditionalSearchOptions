@@ -3,30 +3,18 @@ var script_class = "tool"
 
 # Variables
 var ui_config: Dictionary
-var invisible_tool_panel
-var pattern_tool_panel 
-var pattern_types = ["No Search","Simple Tiles","Patterns","Patterns Colorable"]
-var floor_types = ["No Search","Simple Tiles","Smart Tiles","Smart Tiles Double"]
-var select_tool_panel
-var wall_tool_panel
-var terrain_tool_panel
-var light_tool_panel
-var roof_tool_panel
-var portal_tool_panel
-var last_delta
-var search_focus = null
-var last_entry = ""
+var pattern_types = ["All","Simple Tiles","PatternShapeTool","Patterns Colorable"]
+var pattern_searchable_types = ["Simple Tiles","PatternShapeTool","Patterns Colorable"]
 var _lib_mod_config
-var store_last_valid_selection = null
+var terrainwindowui = null
 
-const UNIQUE_ID = "uchideshi34.AdditionalSearchOptions"
-const TOOL_LOOKUP = {"Patterns": "PatternShapeTool", "Walls": "WallTool", "Portals": "PortalTool", "Lights": "LightTool","Roofs": "RoofTool"}
+const CATEGORY_LOOKUP = {"PatternShapeTool": "Patterns", "WallTool": "Walls", "PortalTool": "Portals", "LightTool": "Lights","RoofTool": "Roofs", "TerrainBrush": "Terrain"}
 
 var max_history_search_terms = 10
 
 # Logging Functions
 const ENABLE_LOGGING = true
-var logging_level = 0
+var logging_level = 2
 
 func outputlog(msg,level=0):
 	if ENABLE_LOGGING:
@@ -86,17 +74,17 @@ func is_the_same(a, b) -> bool:
 func get_node_type(node):
 
 	if node.get("WallID") != null:
-		return "portals"
+		return "PortalTool"
 
 	# Note this is also true of portals but we caught those with WallID
 	elif node.get("Sprite") != null:
-		return "objects"
+		return "ObjectTool"
 	elif node.get("FadeIn") != null:
-		return "paths"
+		return "PathTool"
 	elif node.get("HasOutline") != null:
 		return "pattern_shapes"
 	elif node.get("Joint") != null:
-		return "walls"
+		return "WallTool"
 
 	return null
 
@@ -167,44 +155,56 @@ func find_texture_name_and_pack(texture_string):
 
 
 # Function to find the grid menu category so we can put UI around it and modify it.
-func find_select_grid_menu(category_type: String):
+func find_select_grid_menu(tool_type: String):
 
-	match category_type:
-		"Patterns":
+	var select_tool_panel = Global.Editor.Toolset.GetToolPanel("SelectTool")
+
+	match tool_type:
+		"PatternShapeTool":
 			return select_tool_panel.patternTextureMenu
-		"Walls":
+		"WallTool":
 			return select_tool_panel.wallTextureMenu
-		"Lights":
+		"LightTool":
 			return select_tool_panel.lightTextureMenu
-		"Portals":
+		"PortalTool":
 			return select_tool_panel.portalTextureMenu
 		_:
-			outputlog("Error in find_select_grid_menu: vbox section not found. " + category_type)
+			outputlog("Error in find_select_grid_menu: vbox section not found. " + tool_type)
 			return null
-
-# Make a check button in an invisible tool panel so we don't get a silly error
-func make_check_button(vbox, button_text: String, default_state: bool, ui_index: int, on_toggled_function: String):
-
-	# Make a Check Button in the invisible tool panel
-	var button = invisible_tool_panel.CreateCheckButton(button_text,"",default_state)
-	# Remove it from that tool panel
-	invisible_tool_panel.Align.remove_child(button)
-	# Add it to the required vbox
-	vbox.add_child(button)
-	# Listen for toggled signal and call the right function
-	button.connect("toggled",self,on_toggled_function)
-
-	# Might as well put it in the right place in this function
-	if ui_index > -1:
-		vbox.move_child(button,ui_index)
-
-	return button
 
 # Set the Global SearchHasFocus value
 func on_search_entry_changed_focus(search_has_focus):
 
 	outputlog("on_search_entry_changed_focus: " + str(search_has_focus),2)
 	Global.Editor.SearchHasFocus = search_has_focus
+
+
+# Loads an image texture from ResourceLoader if that is possible or direct from a file if not
+func safe_load_texture(path: String) -> Texture:
+
+	outputlog("safe_load_texture: " + str(path),2)
+
+	var texture = null
+	if ResourceLoader.exists(path):
+		texture = ResourceLoader.load(path)
+	else:
+		var file = File.new()
+		if file.file_exists(path):
+			texture = load_runtime_image(path)
+			if texture != null:
+				texture.resource_path = path
+
+	return texture
+
+# Load an image from a file
+func load_runtime_image(path: String) -> Texture:
+	var img := Image.new()
+	if img.load(path) != OK:
+		return null
+
+	var tex := ImageTexture.new()
+	tex.create_from_image(img)
+	return tex
 
 
 #########################################################################################################
@@ -214,17 +214,17 @@ func on_search_entry_changed_focus(search_has_focus):
 #########################################################################################################
 
 # Main function to clear the grid and reset
-func on_clear_button_pressed(category_type: String, tool_name: String):
+func on_clear_button_pressed(tool_type: String, location: String):
 
 	outputlog("on_clear_button_pressed")
 
 	# Clear everything if needed
-	if ui_config[category_type][tool_name]["search_entry"].text.length() > 0:
-		ui_config[category_type][tool_name]["search_entry"].clear()
-	ui_config[category_type][tool_name]["search_entry_last_value"] = ""
+	if ui_config[tool_type][location]["search_entry"].text.length() > 0:
+		ui_config[tool_type][location]["search_entry"].clear()
+	ui_config[tool_type][location]["search_entry_last_value"] = ""
 
 	# Reload the pattern types in turn
-	if category_type == "Objects":
+	if tool_type == "ObjectTool":
 		if Global.Editor.ObjectLibraryPanel.tagsButton.pressed:
 			# Rest the list
 			if Global.Editor.ActiveToolName in ["ObjectTool", "ScatterTool"]:
@@ -232,58 +232,47 @@ func on_clear_button_pressed(category_type: String, tool_name: String):
 		if Global.Editor.ObjectLibraryPanel.usedButton.pressed:
 			on_used_objects_reset()
 	else:
-		ui_config[category_type][tool_name]["grid_menu"].Reset()
+		# If Patterns with "All" selected, reload all categories instead of just Reset
+		if tool_type == "PatternShapeTool":
+			# Standard reset function
+			for _i in range(pattern_searchable_types.size()):
+				ui_config[tool_type][location]["grid_menu"].Load(pattern_searchable_types[_i])
+				if _i == 0:
+					ui_config[tool_type][location]["grid_menu"].Reset()
+		else:
+			ui_config[tool_type][location]["grid_menu"].Reset()
 		# If this is a portal search and we are in the main tool, the PostInit() function will add back the null portal
-		if category_type == "Portals" && tool_name == "Main":
+		if tool_type == "PortalTool" && location == "main":
 			Global.Editor.Tools["PortalTool"].PostInit()
 
 	# Check whether there are any items in the list and if we are not in the pattern tool, then cycle through all the items to update the default colours
-	refresh_colours_in_grid_menu(category_type,tool_name)
+	refresh_colours_in_grid_menu(tool_type,location)
 	
 # A litte function to run through and select each grid item menu in turn, note this isn't effective if no initial selection has been made
-func select_each_item_in_grid_menu(category_type: String, tool_name: String):
+func select_each_item_in_grid_menu(tool_type: String, location: String):
 
-	outputlog("select_each_item_in_grid_menu: category_type: " + str(category_type) + " tool_name: " + str(tool_name),2)
+	outputlog("select_each_item_in_grid_menu: tool_type: " + str(tool_type) + " location: " + str(location),2)
 
-	var grid_menu = ui_config[category_type][tool_name]["grid_menu"]
+	var grid_menu = ui_config[tool_type][location]["grid_menu"]
 
 	grid_menu.select(0)
 
 	for _i in grid_menu.get_item_count():
 		grid_menu.SelectNext()
 
-# Perform a full reset on a Patterns grid
-func full_Patterns_grid_reset(tool_name: String):
-
-	var category_type = "Patterns"
-
-	# Clear everything
-	ui_config[category_type][tool_name]["search_entry"].clear()
-
-	# Reload the pattern types in turn
-	for _i in range(1,pattern_types.size(),1):
-		# Load the type
-		ui_config[category_type][tool_name]["grid_menu"].Load(pattern_types[_i])
-		# Once we have loaded one category then reset to blank all but that category
-		if _i == 1:
-			ui_config[category_type][tool_name]["grid_menu"].Reset()
-	
-	# If we are in the Main tool and there are non-zero numbers of simple tiles then in order to display custom colours, cycle through those and select them. Don't do this on the select tool.
-	if tool_name == "Main" && Script.GetAssetList("Simple Tiles").size() > 0:
-		# Check whether there are any items in the list and if we are not in the pattern tool, then cycle through all the items to update the default colours
-		refresh_colours_in_grid_menu(category_type,tool_name)
-
 # When the list of used objects needs to be completely reset
 func on_used_objects_reset():
 
-	var category_type = "Objects"
-	var tool_name = "Main"
+	outputlog("on_used_objects_reset", 2)
+
+	var tool_type = "ObjectTool"
+	var location = "main"
 
 	var array_textures = []
 	var thumbnail_textures = []
 	var thumbnail_url
 
-	array_textures = find_assets_used_in_map(category_type, "n/a", category_type,ui_config[category_type][tool_name]["sort_type"])
+	array_textures = find_assets_used_in_map(tool_type, tool_type, ui_config[tool_type][location]["sort_type"])
 
 	# Find all the thumbnails
 	for texture_path in array_textures:
@@ -292,7 +281,7 @@ func on_used_objects_reset():
 			thumbnail_textures.append(load(thumbnail_url))
 
 	# Set the pattern grid menu to only show the list of thumbnail textures
-	ui_config["Objects"]["Main"]["grid_menu"].ShowSet(thumbnail_textures)
+	ui_config["ObjectTool"]["main"]["grid_menu"].ShowSet(thumbnail_textures)
 
 	
 #########################################################################################################
@@ -332,16 +321,15 @@ func is_valid_search_result(search_in_this: String, for_this: String):
 	return return_value
 
 # Function to process the output of new pattern search text
-func on_new_search_text(search_text: String, category_type: String, tool_name: String, source_type: String):
+func on_new_search_text(search_text: String, tool_type: String, location: String, source_type: String):
 
 	var array_textures = []
 	var result
 	var thumbnail_textures = []
-	var grid_menu = ui_config[category_type][tool_name]["grid_menu"]
-	var category: String
+	var grid_menu = ui_config[tool_type][location]["grid_menu"]
 	var thumbnail_url
 
-	outputlog("on_new_search_text: " + str(search_text) + " category_type: " + str(category_type) + " tool_name: " + str(tool_name),2)
+	outputlog("on_new_search_text: " + str(search_text) + " tool_type: " + str(tool_type) + " location: " + str(location),2)
 
 	# If we have installed _Lib check for the search_on_text_changed status
 	if Engine.has_signal("_lib_register_mod"):
@@ -352,49 +340,65 @@ func on_new_search_text(search_text: String, category_type: String, tool_name: S
 	# If the search is blank then reset everything using the clear button feature
 	if search_text.length() < 1:
 		outputlog("search_text length is : " + str(search_text.length()),2)
-		on_clear_button_pressed(category_type,tool_name)
+		on_clear_button_pressed(tool_type,location)
 		return
 
 	# Set the search text to lower just to improve matching
 	search_text = search_text.to_lower()
 	
-	if category_type == "Patterns":
+	if tool_type == "PatternShapeTool":
 		# Set the category according to the drop down selection
-		category = pattern_types[ui_config[category_type][tool_name]["dropdown"].selected]
-		# Reset the grid menu so it knows that thumbnails of this category are coming just to be sure although this should be the case already.
-		grid_menu.Load(category)
-	else:
-		category = category_type
+		
+		# Load all categories and capture Lookup after each Load to build a complete index-to-path mapping
+		# (Lookup only contains the last-loaded category's entries, so we must capture after each Load)
+		var all_index_to_path = {}
+		for _i in range(pattern_searchable_types.size()):
+			grid_menu.Load(pattern_searchable_types[_i])
+			if _i == 0:
+				grid_menu.Reset()
+			for resource_path in grid_menu.Lookup.keys():
+				all_index_to_path[grid_menu.Lookup[resource_path]] = resource_path
+		# Remove non-matching items directly from the ItemList (iterate in reverse to preserve indices)
+		for idx in range(grid_menu.get_item_count() - 1, -1, -1):
+			if all_index_to_path.has(idx):
+				result = all_index_to_path[idx].split("/")[-1].split(".")[0].to_lower()
+				if not is_valid_search_result(result, search_text):
+					grid_menu.remove_item(idx)
+			else:
+				grid_menu.remove_item(idx)
+		outputlog("search results size (All): " + str(grid_menu.get_item_count()),2)
+		refresh_colours_in_grid_menu(tool_type,location)
+		return
 	
 	# Get a list of all possible assets in the right category
-	if category_type == "Objects":
-		if Global.Editor.ObjectLibraryPanel.tagsButton.pressed:
-			# Rest the list
-			if Global.Editor.ActiveToolName in ["ObjectTool", "ScatterTool"]:
-				Global.Editor.TagsPanels[Global.Editor.ActiveToolName].ShowCurrentTagSet()
+	match tool_type:
+		"ObjectTool":
+			if Global.Editor.ObjectLibraryPanel.tagsButton.pressed:
+				# Rest the list
+				if Global.Editor.ActiveToolName in ["ObjectTool", "ScatterTool"]:
+					Global.Editor.TagsPanels[Global.Editor.ActiveToolName].ShowCurrentTagSet()
 
-			# Get the current keys
-			array_textures = Global.Editor.ObjectLibraryPanel.objectMenu.Lookup.keys()
-			array_textures.sort()
-			array_textures.invert()
+				# Get the current keys
+				array_textures = Global.Editor.ObjectLibraryPanel.objectMenu.Lookup.keys()
+				array_textures.sort()
+				array_textures.invert()
 
-		if Global.Editor.ObjectLibraryPanel.usedButton.pressed:
-			array_textures = find_assets_used_in_map(category_type, category, category_type,ui_config[category_type][tool_name]["sort_type"])
-	else:
-		array_textures = Script.GetAssetList(category)
-	
-	outputlog("array_textures size: " + str(array_textures.size()),2)
+			if Global.Editor.ObjectLibraryPanel.usedButton.pressed:
+				array_textures = find_assets_used_in_map(tool_type, tool_type, ui_config[tool_type][location]["sort_type"])
+		_:
+			array_textures = Script.GetAssetList(CATEGORY_LOOKUP[tool_type])
+
 
 	# Look through each asset and determine if it matches the search string
 	for texture_path in array_textures:
 		# If it is Roof then the name of the roof is the part before the final piece e.g. /roof_name/tiles.png
-		if category == "Roofs":
+		if tool_type == "RoofTool":
 			result = texture_path.split("/")[-2].to_lower()
 		# find the name of the asset by looking at the right hand side of the url and stripping off the extension then changing to lower
 		else:
 			result = texture_path.split("/")[-1].split(".")[0].to_lower()
 		# If the search string is contained in the asset name then do something with it
-		#if result.find(search_text) > -1:
+
 		if is_valid_search_result(result, search_text):
 			# Take the url of the texture, derive the url of the thumbnail, load the texture of that thumbnail and add it to a list
 			thumbnail_url = find_thumbnail_url(texture_path)
@@ -402,47 +406,62 @@ func on_new_search_text(search_text: String, category_type: String, tool_name: S
 				thumbnail_textures.append(load(thumbnail_url))
 	
 	outputlog("search results size: " + str(thumbnail_textures.size()),2)
-	
-	# Set the pattern grid menu to only show the list of thumbnail textures
 	grid_menu.ShowSet(thumbnail_textures)
 
 	# If this is a portal search and we are in the main tool, the PostInit() function will add back the null portal
-	if category_type == "Portals" && tool_name == "Main":
+	if tool_type == "PortalTool" && location == "main":
 		Global.Editor.Tools["PortalTool"].PostInit()
 
 	# Check whether there are any items in the list and if we are not in the pattern tool, then cycle through all the items to update the default colours
-	refresh_colours_in_grid_menu(category_type,tool_name)
+	refresh_colours_in_grid_menu(tool_type,location)
 
 	outputlog("finished show set",2)
 
 # Function to update the grid menu to list all the assets previously used on this map (all levels)
-func on_used_assets_button_pressed(category_type: String, tool_name: String, source_category: String):
+func on_used_assets_button_pressed(tool_type: String, location: String, source_category: String):
 
 	var array_textures = []
 	var result
 	var thumbnail_textures = []
-	var grid_menu = ui_config[category_type][tool_name]["grid_menu"]
+	var grid_menu = ui_config[tool_type][location]["grid_menu"]
 	var category: String
 	var thumbnail_url
 
-	outputlog("on_used_assets_button_pressed: " + str(category_type) + "location: " + str(tool_name) + " source_category: " + str(source_category))
+	outputlog("on_used_assets_button_pressed: " + str(tool_type) + "location: " + str(location) + " source_category: " + str(source_category))
 
 	# If the search is blank then reset everything using the clear button feature, but don't do this for paths as we don't own the search text field
-	if category_type != "Paths":
-		ui_config[category_type][tool_name]["search_entry"].clear()
-		ui_config[category_type][tool_name]["search_entry_last_value"] = ""
+	if tool_type != "PathTool":
+		ui_config[tool_type][location]["search_entry"].clear()
+		ui_config[tool_type][location]["search_entry_last_value"] = ""
 	
 	# If the category is patterns
-	if category_type == "Patterns":
+	if tool_type == "PatternShapeTool":
 		# Set the category according to the drop down selection
-		category = pattern_types[ui_config[category_type][tool_name]["dropdown"].selected]
-		# Reset the grid menu so it knows that thumbnails of this category are coming just to be sure although this should be the case already.
-		grid_menu.Load(category)
-	else:
-		category = category_type
+		# Load all categories and capture Lookup after each Load
+		var all_index_to_path = {}
+		for _i in range(pattern_searchable_types.size()):
+			grid_menu.Load(pattern_searchable_types[_i])
+			if _i == 0:
+				grid_menu.Reset()
+			for resource_path in grid_menu.Lookup.keys():
+				all_index_to_path[grid_menu.Lookup[resource_path]] = resource_path
+		# Gather used assets from all searchable pattern categories
+		var used_paths = {}
+		for searchable_category in pattern_searchable_types:
+			for asset_path in find_assets_used_in_map(tool_type, source_category, 0):
+				used_paths[asset_path] = true
+		# Remove items that are NOT used (iterate in reverse to preserve indices)
+		for idx in range(grid_menu.get_item_count() - 1, -1, -1):
+			if all_index_to_path.has(idx):
+				if not used_paths.has(all_index_to_path[idx]):
+					grid_menu.remove_item(idx)
+			else:
+				grid_menu.remove_item(idx)
+		refresh_colours_in_grid_menu(tool_type,location)
+		return
 
 	# Get a list of all possible assets in the right category
-	array_textures = find_assets_used_in_map(category_type, category, source_category,0)
+	array_textures = find_assets_used_in_map(tool_type, source_category, 0)
 
 	# Look through each asset and get its thumbnail
 	for texture_path in array_textures:
@@ -455,16 +474,16 @@ func on_used_assets_button_pressed(category_type: String, tool_name: String, sou
 	grid_menu.ShowSet(thumbnail_textures)
 
 	# If this is a portal search and we are in the main tool, the PostInit() function will add back the null portal
-	if category_type == "Portals" && tool_name == "Main":
+	if tool_type == "PortalTool" && location == "main":
 		Global.Editor.Tools["PortalTool"].PostInit()
 
 	# Check whether there are any items in the list and if we are not in the pattern tool, then cycle through all the items to update the default colours
-	refresh_colours_in_grid_menu(category_type,tool_name)
+	refresh_colours_in_grid_menu(tool_type,location)
 
 # Function that refreshes the visible colours in the grid menu
-func refresh_colours_in_grid_menu(category_type: String, tool_name: String):
+func refresh_colours_in_grid_menu(tool_type: String, location: String):
 
-	var grid_menu = ui_config[category_type][tool_name]["grid_menu"]
+	var grid_menu = ui_config[tool_type][location]["grid_menu"]
 
 	# If _Lib installed and the refresh grid colours not active then don't refresh the grid colours
 	if Engine.has_signal("_lib_register_mod"):
@@ -472,19 +491,20 @@ func refresh_colours_in_grid_menu(category_type: String, tool_name: String):
 			return
 
 	# Check whether there are any items in the list and if we are not in the pattern tool, then cycle through all the items to update the default colours
-	if grid_menu.get_item_count() > 0 && tool_name != "Select":
+	if grid_menu.get_item_count() > 0 && location != "select":
 		# Select the first item in the list if there is anything in the list
 		grid_menu.select(0)
 		# This tells the GridMenu to actually use this value
 		grid_menu.OnItemSelected(0)
 		# Make a loop for all the items being displayed
 		# In order to display custom colours on walls and tile sets
-		if category_type == "Walls" && Global.Header.UsesDefaultAssets:
-			select_each_item_in_grid_menu(category_type,tool_name)
-		# If this is about patterns and specifically for Simple Tiles.
-		if category_type == "Patterns":
-			if pattern_types[ui_config[category_type][tool_name]["dropdown"].selected] == "Simple Tiles":
-				select_each_item_in_grid_menu(category_type,tool_name)
+		if tool_type == "WallTool" && Global.Header.UsesDefaultAssets:
+			select_each_item_in_grid_menu(tool_type,location)
+		# If this is about patterns and specifically for Simple Tiles or All (which includes Simple Tiles).
+		if tool_type == "PatternShapeTool":
+			var selected_pattern_type = pattern_types[ui_config[tool_type][location]["dropdown"].selected]
+			if selected_pattern_type == "Simple Tiles" || selected_pattern_type == "All":
+				select_each_item_in_grid_menu(tool_type,location)
 
 
 # Function to take an array of things, sort it and remove any duplicates
@@ -538,16 +558,18 @@ func filter_unique_array_of_asset_data(array_of_asset_data: Array, sort_type: in
 #########################################################################################################
 
 # Function to find and return a list of resource paths for assets already used in the map. sort_types are: 0 - alphabetical including pack, 1 - alphabetical asset_name only, 2 - by node_id ascending, 3 - by node_id descending
-func find_assets_used_in_map(category_type: String, category: String, source_category: String, sort_type: int):
+func find_assets_used_in_map(tool_type: String, source_category: String, sort_type: int):
+
+	outputlog("find_assets_used_in_map",2)
 
 	var array_of_texture_paths = []
 	var url_match_array = {
 		"Simple Tiles": "tilesets/simple/",
-		"Patterns": "patterns/normal/",
+		"PatternShapeTool": "patterns/normal/",
 		"Patterns Colorable": "patterns/colorable/",
-		"Terrain": "terrain/",
-		"Lights": "lights/",
-		"Portals": "portals/"
+		"TerrainBrush": "terrain/",
+		"LightTool": "lights/",
+		"PortalTool": "portals/"
 	}
 	var temp_resource_path: String
 	var resource_path_data: Dictionary
@@ -557,49 +579,50 @@ func find_assets_used_in_map(category_type: String, category: String, source_cat
 	# For each level in the world
 	for level in Global.World.levels:
 		# If patterns then look for patterns
-		if category_type == "Patterns":
+		if tool_type == "PatternShapeTool":
 			# If this is a normal search then look for pattern shapes
-			if source_category == category_type:
+			if source_category == tool_type:
 				for patternshape in level.PatternShapes.GetShapes():
 					# If the resource path of the pattern matches the value for the category the add it
-					if url_match_array[category] in patternshape._Texture.resource_path:
-						array_of_texture_paths.append(patternshape._Texture.resource_path)
+					for category in pattern_searchable_types:
+						if url_match_array[category] in patternshape._Texture.resource_path:
+							array_of_texture_paths.append(patternshape._Texture.resource_path)
 			# If the source category is Terrain
-			elif source_category == "Terrain":
+			elif source_category == "TerrainBrush":
 				# For each terrain on the level
 				for terrain in level.Terrain.textures:
 					array_of_texture_paths.append(terrain.resource_path)
 				
 		# If walls then look for walls
-		elif category_type == "Walls":
+		elif tool_type == "WallTool":
 			for wall in level.Walls.get_children():
 				array_of_texture_paths.append(wall.Texture.resource_path)
 		
 		# If paths then look for paths
-		elif category_type == "Paths":
+		elif tool_type == "PathTool":
 			for pathway in level.Pathways.get_children():
 				array_of_texture_paths.append(pathway.get_texture().resource_path)
 
 		# If Terrain then look for used pattern shapes and record those to be sorted and made unique
-		elif category_type == "Terrain":
+		elif tool_type == "TerrainBrush":
 			for patternshape in level.PatternShapes.GetShapes():
 				# If the resource path of the pattern matches the value for the category the add it
 				array_of_texture_paths.append(patternshape._Texture.resource_path)
 		
 		# If Lights then look for used lights
-		elif category_type == "Lights":
+		elif tool_type == "LightTool":
 			for light in level.Lights.get_children():
 				# If the resource path of the pattern matches the value for the category the add it
 				array_of_texture_paths.append(light.get_texture().resource_path)
 		
 		# If Roofs then look for used roofs
-		elif category_type == "Roofs":
+		elif tool_type == "RoofTool":
 			for roof in level.Roofs.get_children():
 				# If the resource path of the pattern matches the value for the category the add it
 				array_of_texture_paths.append(roof.TilesTexture.resource_path)
 		
 		# If Lights then look for used portals
-		elif category_type == "Portals":
+		elif tool_type == "PortalTool":
 			for portal in level.Portals.get_children():
 				# If the resource path of the portal matches the value for the category the add it
 				array_of_texture_paths.append(portal.Texture.resource_path)
@@ -609,14 +632,14 @@ func find_assets_used_in_map(category_type: String, category: String, source_cat
 					array_of_texture_paths.append(portal.Texture.resource_path)
 
 		# If searching for Objects in the Used tab
-		elif category_type == "Objects":
+		elif tool_type == "ObjectTool":
 			for prop in level.Objects.get_children():
 				# Avoid Weird props no node_id and with default asset textures
 				if "node_id" in prop.get_meta_list():
 					array_of_asset_data.append({"texture_path": prop.Texture.resource_path, "asset_name": find_texture_name_and_pack(prop.Texture.resource_path)["texture_name"], "node_id": ("0x" + str(prop.get_meta("node_id"))).hex_to_int()})
 
 	# If we need to build a new array of textures from a array of dictionary entries
-	if category_type == "Objects":
+	if tool_type == "ObjectTool":
 
 		# Make the list unique to texture_path keeping the highest/lowest node id
 		array_of_asset_data = filter_unique_array_of_asset_data(array_of_asset_data,sort_type)
@@ -639,7 +662,7 @@ func find_assets_used_in_map(category_type: String, category: String, source_cat
 		array_of_texture_paths = filter_unique_array_of_texture_paths(array_of_texture_paths)
 
 	# If we are looking at different source categories then we need to take the array of source textures and turn them into current tool textures where possible
-	if category_type != source_category:
+	if tool_type != source_category:
 		# Make a copy of the pattern texture paths
 		var copy_of_array = array_of_texture_paths.duplicate()
 		# Clear the destination array which will be rebuilt with terrain texture paths
@@ -649,7 +672,7 @@ func find_assets_used_in_map(category_type: String, category: String, source_cat
 			# Extract the dictionary of resource data {"texture_name": texture_name,"pack_name": pack_name, "pack_id": pack_id}
 			resource_path_data = find_texture_name_and_pack(texture_resource_path)
 			# Construct a potential resource path for the matching terrain asset
-			temp_resource_path = "res://packs/" + resource_path_data["pack_id"] + "/textures/" + url_match_array[category_type] + resource_path_data["texture_name"] + "." + texture_resource_path.split(".")[1]
+			temp_resource_path = "res://packs/" + resource_path_data["pack_id"] + "/textures/" + url_match_array[tool_type] + resource_path_data["texture_name"] + "." + texture_resource_path.split(".")[1]
 			# If there exists a thumbnail file for this path then add the url of the resource path to the array of textures. Not sure why I can't directly use ResourceLoader on the file itself!
 			thumbnail_url = find_thumbnail_url(temp_resource_path)
 			if thumbnail_url != null:
@@ -663,140 +686,37 @@ func find_assets_used_in_map(category_type: String, category: String, source_cat
 ##
 #########################################################################################################
 
-# Function to reset the grid menu if a different category is selected.
-func on_Patterns_dropdown_selected(selected_index, tool_name):
-
-	var category_type = "Patterns"
-
-	# If non-search parameter is selected, then disable the search field
-	if selected_index == 0:
-		# Call the reset function to restore the visibility of all pattern types
-		full_Patterns_grid_reset(tool_name)
-		# Make the search entry hbox hidden
-		ui_config[category_type][tool_name]["hbox"].visible = false
-	# Otherwise show the pattern list and run the search
-	else:
-		# Unhide the search entry hbox
-		ui_config[category_type][tool_name]["hbox"].visible = true
-		# Clear everything that's in the grid
-		# Load the new assets.
-		ui_config[category_type][tool_name]["grid_menu"].Load(pattern_types[selected_index])
-		# Run the current search against them
-		on_new_search_text(ui_config[category_type][tool_name]["search_entry"].text, category_type, tool_name, "internal")
-
-# Toggle terrain search visibility
-func on_terrain_active_button_pressed(value):
-
-	var category_type = "Terrain"
-	var tool_name = "Main"
-
-	if value:
-		ui_config[category_type][tool_name]["section"].visible = true
-		for ui_element in ui_config[category_type][tool_name]["hide_ui"]:
-			ui_element.visible = false
-	else:
-		ui_config[category_type][tool_name]["section"].visible = false
-		for ui_element in ui_config[category_type][tool_name]["hide_ui"]:
-			ui_element.visible = true
-
-# If we press the set terrain button, then set the terrain slot texture based on the grid value selected and the slot in the drop down
-func on_set_terrain_slot_button_pressed():
-
-	var category_type = "Terrain"
-	var tool_name = "Main"
-	var thumbnail_path
-	var thumbnail_texture
-	var thumbnail_name
-	var index
-	var texture = ui_config[category_type][tool_name]["grid_menu"].Selected
-	var terrain_list = Global.Editor.Tools["TerrainBrush"].terrainList
-
-	index = Global.Editor.Tools["TerrainBrush"].TerrainID
-	
-	# If we have a valid texture selected then set it
-	if texture:
-
-		# Get the details of the terrain's thumbnail so we can update the UI
-		thumbnail_path = find_thumbnail_url(texture.resource_path)
-		if thumbnail_path != null:
-		
-			thumbnail_name = texture.resource_path.split("/")[-1].split(".")[0]
-			thumbnail_texture = ResourceLoader.load(thumbnail_path)
-
-			# Update the visuals of the terrain brush tool to reflect the change we have made
-			terrain_list.set_item_text(index,thumbnail_name)
-			terrain_list.set_item_icon(index,thumbnail_texture)
-			terrain_list.set_item_tooltip(index,thumbnail_name)
-
-			# Set the texture on the map itself
-			Global.World.GetCurrentLevel().Terrain.SetTexture(texture, index)
-
-# If requested to move the panel to the rightside
-func on_terrain_rh_panel_button_pressed(value):
-
-	var category_type = "Terrain"
-	var tool_name = "Main"
-
-	if value:
-		# If there isn't a rightside panel created then make one
-		if not ui_config[category_type][tool_name].has("rh_panel"):
-			ui_config[category_type][tool_name]["rh_panel"] = terrain_tool_panel.CreateRightsidePanel("Search Terrain")
-		
-		# Make the right hand panel visible as you need to flash away to get this working
-		ui_config[category_type][tool_name]["rh_panel"].visible = true
-		Global.Editor.Toolset.Quickswitch("ObjectTool")
-		Global.Editor.Toolset.Quickswitch("TerrainBrush")
-		
-		# Move the section containing all of the buttons and grid and stuff to the right hand side
-		terrain_tool_panel.Align.remove_child(ui_config[category_type][tool_name]["section"])
-		ui_config[category_type][tool_name]["rh_panel"].Align.add_child(ui_config[category_type][tool_name]["section"])
-		
-	else:
-		# If the panel doesn't exist for some strange reason then do nothing
-		if not ui_config[category_type][tool_name].has("rh_panel"):
-			return
-		
-		# Hide the right hand panel - note this doesn't work for some reason
-		ui_config[category_type][tool_name]["rh_panel"].visible = false
-		Global.Editor.Toolset.Quickswitch("ObjectTool")
-		Global.Editor.Toolset.Quickswitch("TerrainBrush")
-
-		# Move the section containing all of the buttons and grid and stuff back to the left hand side
-		ui_config[category_type][tool_name]["rh_panel"].Align.remove_child(ui_config[category_type][tool_name]["section"])
-		terrain_tool_panel.Align.add_child(ui_config[category_type][tool_name]["section"])
-
 # Hide the search bar unless the "Used" tab is open
 func on_object_filter_button_toggled(button_pressed: bool, button: Button):
 
 	outputlog("on_object_filter_button_toggled",2)
-	var category_type = "Objects"
-	var tool_name = "Main"
+	var tool_type = "ObjectTool"
+	var location = "main"
 
 	if button_pressed:
 		match button:
 			Global.Editor.ObjectLibraryPanel.usedButton:
-				for button in ui_config[category_type][tool_name]["sort_type_buttons"]:
+				for button in ui_config[tool_type][location]["sort_type_buttons"]:
 					button.visible = true
 
-				ui_config[category_type][tool_name]["hbox"].visible = true
+				ui_config[tool_type][location]["hbox"].visible = true
 				refresh_object_search_after_delay()
 				
 			Global.Editor.ObjectLibraryPanel.tagsButton:
-				for button in ui_config[category_type][tool_name]["sort_type_buttons"]:
+				for button in ui_config[tool_type][location]["sort_type_buttons"]:
 					button.visible = false
-				ui_config[category_type][tool_name]["hbox"].visible = true
+				ui_config[tool_type][location]["hbox"].visible = true
 				refresh_object_search_after_delay()
 			_:
-				ui_config[category_type][tool_name]["hbox"].visible = false
-		
+				ui_config[tool_type][location]["hbox"].visible = false
 	
 # After a delay re-run the object search based on current value of search entry
 func refresh_object_search_after_delay(delay: float = 0.1):
 
 	outputlog("refresh_object_search_after_delay",2)
 
-	var category_type = "Objects"
-	var tool_name = "Main"
+	var tool_type = "ObjectTool"
+	var location = "main"
 	var timer = Timer.new()
 	timer.autostart = false
 	timer.one_shot = true
@@ -804,7 +724,7 @@ func refresh_object_search_after_delay(delay: float = 0.1):
 
 	timer.start(delay)
 	yield(timer,"timeout")
-	on_new_search_text(ui_config[category_type][tool_name]["search_entry"].text, category_type, tool_name, "text_entered")
+	on_new_search_text(ui_config[tool_type][location]["search_entry"].text, tool_type, location, "text_entered")
 
 	Global.Editor.get_node("Windows").remove_child(timer)
 	timer.queue_free()
@@ -834,8 +754,8 @@ func on_toolpanel_visibility_changed(tool_type: String):
 				timer.start(0.05)
 				yield(timer,"timeout")
 				# Emit the signal so that it tells DD that the object panel should be filtered by the search entry
-				if ui_config["Objects"]["Main"].has("dd_search_entry"):
-					ui_config["Objects"]["Main"]["dd_search_entry"].emit_signal("text_entered",ui_config["Objects"]["Main"]["dd_search_entry"].text)
+				if ui_config["ObjectTool"]["main"].has("dd_search_entry"):
+					ui_config["ObjectTool"]["main"]["dd_search_entry"].emit_signal("text_entered",ui_config["ObjectTool"]["main"]["dd_search_entry"].text)
 	
 	Global.Editor.get_node("Windows").remove_child(timer)
 	timer.queue_free()
@@ -843,8 +763,8 @@ func on_toolpanel_visibility_changed(tool_type: String):
 # Function to toggle sorting state
 func on_used_object_sorting_button_toggled(new_state: bool, sort_type: int):
 
-	var category_type = "Objects"
-	var tool_name = "Main"
+	var tool_type = "ObjectTool"
+	var location = "main"
 
 	if not new_state:
 		return
@@ -852,11 +772,11 @@ func on_used_object_sorting_button_toggled(new_state: bool, sort_type: int):
 	# Set the other buttons to not pressed
 	for _i in 4:
 		if _i != sort_type:
-			ui_config[category_type][tool_name]["sort_type_buttons"][_i].pressed = false
+			ui_config[tool_type][location]["sort_type_buttons"][_i].pressed = false
 	
 	# Record the current sort type
-	ui_config[category_type][tool_name]["sort_type"] = sort_type
-	on_clear_button_pressed(category_type,tool_name)
+	ui_config[tool_type][location]["sort_type"] = sort_type
+	on_clear_button_pressed(tool_type,location)
 
 #########################################################################################################
 ##
@@ -871,199 +791,119 @@ func hide_mod_tool(category: String, name: String):
 		if button.text == name:
 			button.visible = false
 
-# Find the UI elements of the terrain tool that we can hide if search is enabled
-func find_terrain_ui_to_be_suppressed():
-
-	outputlog("find_terrain_ui_to_be_suppressed")
-
-	var category_type = "Terrain"
-	var tool_name = "Main"
-
-	ui_config[category_type][tool_name]["hide_ui"] = []
-
-	# Look through all the elements in the terrain brush UI and add the ones we want to hide to the ui_config
-	for thing in terrain_tool_panel.Align.get_children():
-		if thing is Label || thing is Button:
-			if thing.text.to_upper() in ["BIOME","SETTLEMENT","WARNING: UNLOCKING MORE SLOTS CAN DRASTICALLY REDUCE PERFORMANCE", "TERRAIN_EXPAND_WARNING"]:
-				ui_config[category_type][tool_name]["hide_ui"].append(thing)
-	
-
 # Making a general function for creating the elements of UI for search
-func make_search_ui(tool_panel, category_type: String, tool_name: String):
+func make_search_ui(tool_type: String, location: String):
 
 	var label = Label.new()
 	var type_label = Label.new()
 	var clear_button = Button.new()
 	var used_button = Button.new()
-	var terrain_used_button
-	
-	var icon_texture
-	var icon_path = Global.Root + "ui/trash_icon.png"
-	var icon_image = Image.new()
-	var err = icon_image.load(icon_path)
+	var tool_panel = Global.Editor.Toolset.GetToolPanel(tool_type)
+
 	var ui_index
 	var vbox
-
-	if err != OK:
-		# Failed
-		outputlog("Failed to load trash icon")
 	
-	outputlog("make_search_ui: " + str(category_type) + " location: " + str(tool_name))
+	outputlog("make_search_ui: " + str(tool_type) + " location: " + str(location))
 
 	# Load the clear icon from file path
-	icon_texture = ImageTexture.new()
-	icon_texture.create_from_image(icon_image, 0)
-
-	icon_texture = load_image_texture("ui/trash_icon.png")
+	var icon_texture = load_image_texture("ui/trash_icon.png")
 
 	# Create dictionary entries for the UI
-	if not ui_config.has(category_type):
-		ui_config[category_type] = {}
+	if not ui_config.has(tool_type):
+		ui_config[tool_type] = {}
 	
-	if not ui_config[category_type].has(tool_name):
-		ui_config[category_type][tool_name] = {}
+	if not ui_config[tool_type].has(location):
+		ui_config[tool_type][location] = {}
 	
 	# Find grid menu reference
 	# If we are looking to construct the main panel search
-	if tool_name == "Main":
+	if location == "main":
 		# vbox is the main tool panel align vbox
 		vbox = tool_panel.Align
 		# Look for the grid menu in the tool panel
-		if category_type != "Terrain":
-			ui_config[category_type][tool_name]["grid_menu"] = Global.Editor.Tools[TOOL_LOOKUP[category_type]].Controls["Texture"]
-		# If this is a terrain tool then we need to make a few more things in particular a grid menu
-		else:
-			# Make an option button to activate search UI
-			ui_config[category_type][tool_name]["active_button"] = make_check_button(tool_panel.Align, "Enable Terrain Search", false, -1, "on_terrain_active_button_pressed")
-			
-			# Begin a section that will get hidden if the option button is not selected
-			ui_config[category_type][tool_name]["section"] = tool_panel.BeginSection(true)
-			# Make a button to set the terrain slot
-			ui_config[category_type][tool_name]["set_button"] = tool_panel.CreateButton("Set Terrain Slot", "res://ui/icons/tools/terrain_brush.png")
-			ui_config[category_type][tool_name]["set_button"].connect("pressed",self,"on_set_terrain_slot_button_pressed")
-			# Make a grid menu
-			ui_config[category_type][tool_name]["grid_menu"] = tool_panel.CreateTextureGridMenu("TerrainTextureGridID",category_type,true)
-			ui_config[category_type][tool_name]["grid_menu"].ShowsPreview = false
-			tool_panel.EndSection()
-			# Make an option button to activate search UI
-			ui_config[category_type][tool_name]["rh_panel_button"] = make_check_button(ui_config[category_type][tool_name]["section"], "Move Search To RH Panel", false, 0, "on_terrain_rh_panel_button_pressed")
-			
-			ui_config[category_type][tool_name]["section"].visible = false
-			vbox = ui_config[category_type][tool_name]["section"]
-
-			# Find the UI elements in the terrain tool that we don't really need if search is enabled
-			find_terrain_ui_to_be_suppressed()
+		ui_config[tool_type][location]["grid_menu"] = Global.Editor.Tools[tool_type].Controls["Texture"]
 
 	# Or if we are looking at the Select tool
-	elif tool_name == "Select":
-		# find the select grid menu, noting that category_type in the labels is the singular version of the category_type
-		ui_config[category_type][tool_name]["grid_menu"] = find_select_grid_menu(category_type)
+	elif location == "select":
+		# find the select grid menu, noting that tool_type in the labels is the singular version of the tool_type
+		ui_config[tool_type][location]["grid_menu"] = find_select_grid_menu(tool_type)
 		# Apparent get_parent is bad practice in general but we are probably safe in this context. Find the parent node in the select ui which should be the section made visible when that category of asset is found.
-		vbox = ui_config[category_type][tool_name]["grid_menu"].get_parent()
+		vbox = ui_config[tool_type][location]["grid_menu"].get_parent()
 	# Set the index to start adding things
-	ui_index = ui_config[category_type][tool_name]["grid_menu"].get_index()
+	ui_index = ui_config[tool_type][location]["grid_menu"].get_index()
 
 	# Make a line for the search entry
-	ui_config[category_type][tool_name]["hbox"] = HBoxContainer.new()
-
-	# If we are setting up Patterns then we need to set ui to select the different types of patterns, ie Patterns, Simple Tiles and Colurable Patterns
-	if category_type == "Patterns":
-
-		# Define a dropdown button to choose the right type of pattern
-		# Make a dropdown button with options for each pattern type
-		var hbox = HBoxContainer.new()
-		var dd_label = Label.new()
-		var option_button = OptionButton.new()
-
-		dd_label.text = "Search Type"
-		for value in pattern_types:
-			option_button.add_item(value)
-		option_button.size_flags_horizontal = 3
-		option_button.align = 1
-		hbox.add_child(dd_label)
-		hbox.add_child(option_button)
-
-		# Link the option_button the main UI config and connect the signal
-		ui_config[category_type][tool_name]["dropdown"] = option_button
-		ui_config[category_type][tool_name]["dropdown"].connect("item_selected",self,"on_Patterns_dropdown_selected",[tool_name])
-		# Move the hbox to the right place in the UI
-		vbox.add_child(hbox)
-		vbox.move_child(hbox,ui_index)
-		ui_index += 1
-
-		# Finally set the default values as "No Search"
-		ui_config[category_type][tool_name]["dropdown"].selected = 0
-		ui_config[category_type][tool_name]["hbox"].visible = false
+	ui_config[tool_type][location]["hbox"] = HBoxContainer.new()
 	
 	# Create search entry reference
-	ui_config[category_type][tool_name]["search_entry"] = LineEdit.new()
-
-	# Add the hbox of the search entry to the tool panel and move it to the right place
-	vbox.add_child(ui_config[category_type][tool_name]["hbox"])
-	vbox.move_child(ui_config[category_type][tool_name]["hbox"],ui_index)
-
-	# Create a button for loading into patterns list
-	if category_type == "Patterns":
-		terrain_used_button =  Button.new()
-		terrain_used_button.icon = ResourceLoader.load("res://ui/icons/tools/scatter_tool.png")
-		terrain_used_button.hint_tooltip = "Load (where possible) the set of pattern textures matching the terrain textures already used on this map."
-		terrain_used_button.connect("pressed",self,"on_used_assets_button_pressed",[category_type,tool_name,"Terrain"])
+	ui_config[tool_type][location]["search_entry"] = LineEdit.new()
 
 	# Make the hbox search entry with a label, the lineedit and a clear button
-	
-	# If search type is terrain then use patterns as the source
-	if category_type == "Terrain":
-		used_button.icon = ResourceLoader.load("res://ui/icons/tools/scatter_tool.png")
-		used_button.hint_tooltip = "Load (where possible) the set of terrain textures matching the pattern textures already used on this map."
-		used_button.connect("pressed",self,"on_used_assets_button_pressed",[category_type,tool_name,"Patterns"])
-	# Otherwise use the current category (which is the usual one)
-	else:
-		used_button.icon = ResourceLoader.load("res://ui/icons/tools/map_settings.png")
-		used_button.hint_tooltip = "Load the set of " + str(category_type.rstrip("s").to_lower()) + " textures already used on this map."
-		used_button.connect("pressed",self,"on_used_assets_button_pressed",[category_type,tool_name,category_type])
+	used_button.icon = ResourceLoader.load("res://ui/icons/tools/map_settings.png")
+	used_button.hint_tooltip = "Load the set of " + str(tool_type.rstrip("s").to_lower()) + " textures already used on this map."
+	used_button.connect("pressed",self,"on_used_assets_button_pressed",[tool_type,location,tool_type])
 
 	# Configure the clear button with its icon & tooltip
 	clear_button.icon = icon_texture
 	clear_button.hint_tooltip = "Clear Search"
 	# Listen for the pressed signal
-	clear_button.connect("pressed",self,"on_clear_button_pressed",[category_type,tool_name])
-	# Add the elements into the hbox
-	label.text = "Search"
-	ui_config[category_type][tool_name]["hbox"].add_child(label)
-	ui_config[category_type][tool_name]["hbox"].add_child(ui_config[category_type][tool_name]["search_entry"])
-	ui_config[category_type][tool_name]["hbox"].add_child(used_button)
-	# For Patterns or Walls, add a button that lists any items already used in the menu
-	if category_type == "Patterns":
-		ui_config[category_type][tool_name]["hbox"].add_child(terrain_used_button)
+	clear_button.connect("pressed",self,"on_clear_button_pressed",[tool_type,location])
 
-	ui_config[category_type][tool_name]["hbox"].add_child(clear_button)
-	ui_config[category_type][tool_name]["search_entry"].size_flags_horizontal = 3
+	# Line 1 (hbox): "Search" label + dropdown + used_button + terrain_used_button
+	# Line 2 (search_hbox): LineEdit (full width) + clear_button
+	var search_hbox = HBoxContainer.new()
+	ui_config[tool_type][location]["search_hbox"] = search_hbox
+
+	# Populate buttons line
+	label.text = "Search"
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ui_config[tool_type][location]["hbox"].add_child(label)
+	ui_config[tool_type][location]["hbox"].add_child(used_button)
+	if tool_type == "PatternShapeTool":
+		var terrain_used_button = Button.new()
+		terrain_used_button.icon = ResourceLoader.load("res://ui/icons/tools/terrain_brush.png")
+		terrain_used_button.hint_tooltip = "Load (where possible) the set of pattern textures matching the terrain textures already used on this map."
+		terrain_used_button.connect("pressed",self,"on_used_assets_button_pressed",[tool_type,location,"TerrainBrush"])
+		ui_config[tool_type][location]["hbox"].add_child(terrain_used_button)
+
+	# Populate search bar line
+	search_hbox.add_child(ui_config[tool_type][location]["search_entry"])
+	search_hbox.add_child(clear_button)
+	ui_config[tool_type][location]["search_entry"].size_flags_horizontal = 3
+
+	# Add both lines to the vbox
+	vbox.add_child(ui_config[tool_type][location]["hbox"])
+	vbox.move_child(ui_config[tool_type][location]["hbox"],ui_index)
+	ui_index += 1
+	vbox.add_child(search_hbox)
+	vbox.move_child(search_hbox,ui_index)
+
 	# Listen for the text being entered and do the search
-	ui_config[category_type][tool_name]["search_entry"].connect("text_entered",self,"on_new_search_text",[category_type,tool_name,"text_entered"])
-	ui_config[category_type][tool_name]["search_entry"].connect("text_changed",self,"on_new_search_text",[category_type,tool_name,"text_changed"])
-	ui_config[category_type][tool_name]["search_entry"].connect("focus_exited",self,"on_search_entry_changed_focus", [false])
-	ui_config[category_type][tool_name]["search_entry"].connect("focus_entered",self,"on_search_entry_changed_focus", [true])
+	ui_config[tool_type][location]["search_entry"].connect("text_entered",self,"on_new_search_text",[tool_type,location,"text_entered"])
+	ui_config[tool_type][location]["search_entry"].connect("text_changed",self,"on_new_search_text",[tool_type,location,"text_changed"])
+	ui_config[tool_type][location]["search_entry"].connect("focus_exited",self,"on_search_entry_changed_focus", [false])
+	ui_config[tool_type][location]["search_entry"].connect("focus_entered",self,"on_search_entry_changed_focus", [true])
 
 
 # Make a search ui for used objects tab taking over the current version
 func make_search_ui_used_paths():
 
-	var category_type = "Paths"
-	var tool_name = "Main"
+	var tool_type = "PathTool"
+	var location = "main"
 	var hbox = Global.Editor.PathLibraryPanel.find_node("Search")
 
 	# Set up the base parameters
-	ui_config[category_type] = {}
-	ui_config[category_type][tool_name] = {}
-	ui_config[category_type][tool_name]["grid_menu"] = Global.Editor.PathLibraryPanel.PathMenu
+	ui_config[tool_type] = {}
+	ui_config[tool_type][location] = {}
+	ui_config[tool_type][location]["grid_menu"] = Global.Editor.PathLibraryPanel.PathMenu
 
 	# Configure the clear button with its icon & tooltip
 	var list_used_button = Button.new()
 	list_used_button.icon = load_image_texture("res://ui/icons/tools/map_settings.png")
 	list_used_button.hint_tooltip = "Search for paths already used on this map."
 	# Listen for the pressed signal
-	#func on_used_assets_button_pressed(category_type: String, tool_name: String, source_category: String):
-	list_used_button.connect("pressed",self,"on_used_assets_button_pressed",[category_type,tool_name,category_type])
+	#func on_used_assets_button_pressed(tool_type: String, location: String, source_category: String):
+	list_used_button.connect("pressed",self,"on_used_assets_button_pressed",[tool_type,location,tool_type])
 	
 	hbox.add_child(list_used_button)
 	hbox.move_child(list_used_button,2)
@@ -1071,33 +911,33 @@ func make_search_ui_used_paths():
 # Make a search ui for used objects tab taking over the current version
 func make_search_ui_used_objects():
 
-	var category_type = "Objects"
-	var tool_name = "Main"
+	var tool_type = "ObjectTool"
+	var location = "main"
 	var vbox = Global.Editor.ObjectLibraryPanel.find_node("VAlign")
 	var icon_texture = load_image_texture("ui/trash_icon.png")
 	var label = Label.new()
 	var sort_type_buttons = []
 
 	# Set up the base parameters
-	ui_config[category_type] = {}
-	ui_config[category_type][tool_name] = {}
-	ui_config[category_type][tool_name]["hbox"] = HBoxContainer.new()
-	ui_config[category_type][tool_name]["grid_menu"] = Global.Editor.ObjectLibraryPanel.objectMenu
-	ui_config[category_type][tool_name]["sort_type"] = 0
+	ui_config[tool_type] = {}
+	ui_config[tool_type][location] = {}
+	ui_config[tool_type][location]["hbox"] = HBoxContainer.new()
+	ui_config[tool_type][location]["grid_menu"] = Global.Editor.ObjectLibraryPanel.objectMenu
+	ui_config[tool_type][location]["sort_type"] = 0
 
-	vbox.add_child(ui_config[category_type][tool_name]["hbox"])
-	vbox.move_child(ui_config[category_type][tool_name]["hbox"],3)
+	vbox.add_child(ui_config[tool_type][location]["hbox"])
+	vbox.move_child(ui_config[tool_type][location]["hbox"],3)
 
 	# Create search entry reference
-	ui_config[category_type][tool_name]["search_entry"] = LineEdit.new()
-	ui_config[category_type][tool_name]["search_entry_last_value"] = ""
+	ui_config[tool_type][location]["search_entry"] = LineEdit.new()
+	ui_config[tool_type][location]["search_entry_last_value"] = ""
 	
 	# Configure the clear button with its icon & tooltip
 	var clear_button = Button.new()
 	clear_button.icon = icon_texture
 	clear_button.hint_tooltip = "Clear Search"
 	# Listen for the pressed signal
-	clear_button.connect("pressed",self,"on_clear_button_pressed",[category_type,tool_name])
+	clear_button.connect("pressed",self,"on_clear_button_pressed",[tool_type,location])
 
 	for _i in 4:
 		sort_type_buttons.append(Button.new())
@@ -1114,28 +954,83 @@ func make_search_ui_used_objects():
 	sort_type_buttons[3].icon = load_image_texture("ui/oldest.png")
 	sort_type_buttons[3].hint_tooltip = "Sort least recently used first"
 
-	ui_config[category_type][tool_name]["sort_type_buttons"] = sort_type_buttons
+	ui_config[tool_type][location]["sort_type_buttons"] = sort_type_buttons
 
 	# Add the elements into the hbox
 	label.text = "Search"
-	ui_config[category_type][tool_name]["hbox"].add_child(label)
-	ui_config[category_type][tool_name]["hbox"].add_child(ui_config[category_type][tool_name]["search_entry"])
+	ui_config[tool_type][location]["hbox"].add_child(label)
+	ui_config[tool_type][location]["hbox"].add_child(ui_config[tool_type][location]["search_entry"])
 	for _i in 4:
-		ui_config[category_type][tool_name]["hbox"].add_child(ui_config[category_type][tool_name]["sort_type_buttons"][_i])
+		ui_config[tool_type][location]["hbox"].add_child(ui_config[tool_type][location]["sort_type_buttons"][_i])
 	
-	ui_config[category_type][tool_name]["hbox"].add_child(clear_button)
-	ui_config[category_type][tool_name]["search_entry"].size_flags_horizontal = 3
+	ui_config[tool_type][location]["hbox"].add_child(clear_button)
+	ui_config[tool_type][location]["search_entry"].size_flags_horizontal = 3
 	# Listen for the text being entered and do the search
-	ui_config[category_type][tool_name]["search_entry"].connect("text_entered",self,"on_new_search_text",[category_type,tool_name,"text_entered"])
-	ui_config[category_type][tool_name]["search_entry"].connect("text_changed",self,"on_new_search_text",[category_type,tool_name,"text_changed"])
-	ui_config[category_type][tool_name]["search_entry"].connect("focus_exited",self,"on_search_entry_changed_focus", [false])
-	ui_config[category_type][tool_name]["search_entry"].connect("focus_entered",self,"on_search_entry_changed_focus", [true])
+	ui_config[tool_type][location]["search_entry"].connect("text_entered",self,"on_new_search_text",[tool_type,location,"text_entered"])
+	ui_config[tool_type][location]["search_entry"].connect("text_changed",self,"on_new_search_text",[tool_type,location,"text_changed"])
+	ui_config[tool_type][location]["search_entry"].connect("focus_exited",self,"on_search_entry_changed_focus", [false])
+	ui_config[tool_type][location]["search_entry"].connect("focus_entered",self,"on_search_entry_changed_focus", [true])
 
 	# Listen to the toggles on all, used and tags buttons in order to show the search bar or not
 	Global.Editor.ObjectLibraryPanel.allButton.connect("toggled", self, "on_object_filter_button_toggled",[Global.Editor.ObjectLibraryPanel.allButton])
 	Global.Editor.ObjectLibraryPanel.usedButton.connect("toggled", self, "on_object_filter_button_toggled",[Global.Editor.ObjectLibraryPanel.usedButton])
 	Global.Editor.ObjectLibraryPanel.tagsButton.connect("toggled", self, "on_object_filter_button_toggled",[Global.Editor.ObjectLibraryPanel.tagsButton])
 	on_object_filter_button_toggled(true, Global.Editor.ObjectLibraryPanel.allButton)
+
+#########################################################################################################
+##
+## TERRAIN WINDOW FUNCTIONS
+##
+#########################################################################################################
+
+func setup_terrain_window():
+
+	outputlog("setup_terrain_window")
+
+	if terrainwindowui == null:
+		var TerrainWindowUI = ResourceLoader.load(Global.Root + "TerrainWindowUI.gd", "GDScript", true)
+		terrainwindowui = TerrainWindowUI.new(Global, Script)
+		terrainwindowui.connect("terrain_selected", self, "_on_terrain_selected")
+		Global.Editor.Toolset.GetToolPanel("TerrainBrush").connect("visibility_changed", self, "_connect_to_terrain_buttons",[null, 0.1])
+		Global.Editor.Tools["TerrainBrush"].Controls["ExpandSlotsButton"].connect("toggled", self, "_connect_to_terrain_buttons",[0.1])
+		terrainwindowui.make_search_history_ui()
+
+func _connect_to_terrain_buttons(_ignore_this, delay: float = 0.1):
+
+	outputlog("_connect_to_terrain_buttons",2)
+
+	var timer = Timer.new()
+	timer.autostart = false
+	timer.one_shot = true
+	Global.Editor.get_node("Windows").add_child(timer)
+	timer.start(delay)
+
+	yield(timer,"timeout")
+
+	var buttons = Global.Editor.Tools["TerrainBrush"].terrainButtonBox.get_children()
+
+	for _i in buttons.size():
+		if not buttons[_i].is_connected("pressed", self, "_on_terrain_selection_button_pressed"):
+			buttons[_i].connect("pressed", self, "_on_terrain_selection_button_pressed",[_i])
+
+	Global.Editor.get_node("Windows").remove_child(timer)
+	timer.queue_free()
+
+func _on_terrain_selection_button_pressed(index: int):
+
+	terrainwindowui.target = index
+	if Global.Editor.Windows["TerrainWindow"].visible:
+		Global.Editor.Windows["TerrainWindow"].visible = false
+		terrainwindowui.show()
+
+func _on_terrain_selected(target: int, texture_path: String):
+
+	outputlog("_on_terrain_selected: target: " +str(target) + " texture_path: " + str(texture_path),2)
+
+	var texture = safe_load_texture(texture_path)
+	Global.Editor.Tools["TerrainBrush"].SetTextureFromWindow(texture, target)
+
+
 
 
 #########################################################################################################
@@ -1145,21 +1040,21 @@ func make_search_ui_used_objects():
 #########################################################################################################
 
 # Function to make a search history capability for Object Library Panel
-func make_search_history_for_tool_ui(category_type: String, tool_name: String):
+func make_search_history_for_tool_ui(tool_type: String, location: String):
 
-	outputlog("make_search_history_for_tool_ui: category_type" + str(category_type) + " tool_name: " + str(tool_name))
+	outputlog("make_search_history_for_tool_ui: tool_type" + str(tool_type) + " location: " + str(location))
 
 	var search_hbox = null
 	var search_lineedit = null
 
-	if category_type in ["Objects","Paths"]:
+	if tool_type in ["ObjectTool","PathTool"]:
 		# Ignore select requests for objects and paths and the library and search entry is common
-		if tool_name == "Select": return
+		if location == "select": return
 		# Finf the search hbox containers
-		match category_type:
-			"Objects":
+		match tool_type:
+			"ObjectTool":
 				search_hbox = Global.Editor.ObjectLibraryPanel.filters.find_node("Search")
-			"Paths":
+			"PathTool":
 				search_hbox = Global.Editor.PathLibraryPanel.filters.find_node("Search")
 			_:
 				return
@@ -1169,17 +1064,17 @@ func make_search_history_for_tool_ui(category_type: String, tool_name: String):
 			return
 		# Look for the search line edit
 		search_lineedit = search_hbox.find_node("SearchLineEdit")
-		ui_config[category_type][tool_name]["dd_search_entry"] = search_lineedit
+		ui_config[tool_type][location]["dd_search_entry"] = search_lineedit
 	else:
-		search_hbox = ui_config[category_type][tool_name]["hbox"]
-		search_lineedit = ui_config[category_type][tool_name]["search_entry"]
+		search_hbox = ui_config[tool_type][location]["hbox"]
+		search_lineedit = ui_config[tool_type][location]["search_entry"]
 
 
 	if search_hbox != null && search_lineedit != null:
-		make_search_history_ui(category_type, tool_name, search_hbox, search_lineedit)
+		make_search_history_ui(search_hbox, search_lineedit)
 
 # Function to make a search history capability for Object Library Panel
-func make_search_history_ui(category_type: String, tool_name: String, search_hbox: HBoxContainer, search_lineedit: LineEdit):
+func make_search_history_ui(search_hbox: HBoxContainer, search_lineedit: LineEdit):
 
 	outputlog("make_search_history_ui")
 
@@ -1189,13 +1084,13 @@ func make_search_history_ui(category_type: String, tool_name: String, search_hbo
 	search_hbox.move_child(menubutton,1)
 
 	menubutton.icon = load_image_texture("ui/history-icon.png")
-	menubutton.hint_tooltip = "Select from a list of previous searche."
+	menubutton.hint_tooltip = "Select from a list of previous searches."
 
 	# Connect to the signal when a text has been entered
 	search_lineedit.connect("text_entered", self, "on_store_new_search_history_item",[menubutton])
 
 	# Connect to the id pressed signal to respond when the search history item has been selected.
-	menubutton.get_popup().connect("id_pressed", self, "on_search_history_item_selected", [category_type, tool_name, menubutton, search_lineedit])
+	menubutton.get_popup().connect("id_pressed", self, "on_search_history_item_selected", [menubutton, search_lineedit])
 
 # Function to remove all matching text from popupmenu of text items
 func remove_matching_text_item_from_popupmenu(text: String, popupmenu: PopupMenu) -> bool:
@@ -1237,7 +1132,7 @@ func on_store_new_search_history_item(search_text: String, menubutton: MenuButto
 
 
 # Function to respond when a search history is selected
-func on_search_history_item_selected(id: int, category_type: String, tool_name: String, search_button: MenuButton, search_lineedit: LineEdit):
+func on_search_history_item_selected(id: int, search_button: MenuButton, search_lineedit: LineEdit):
 
 	var search_text = ""
 
@@ -1269,7 +1164,6 @@ func move_item_to_top_of_popupmenu(id: int, popupmenu: PopupMenu):
 	# Write the stored values back into the array in order.
 	for _i in store_list.size():
 		popupmenu.add_item(store_list[_i])
-
 
 #########################################################################################################
 ##
@@ -1348,15 +1242,6 @@ func start() -> void:
 
 	outputlog("AdditionalSearchOptions Mod Has been loaded.")
 
-	# Ridiculous work around to stop button signals throwing errors
-	var category = "Effects"
-	var id = "AdditionalSearchOptions"
-	var name = "Search Tool"
-	var icon = "res://ui/icons/tools/material_brush.png"
-	invisible_tool_panel = Global.Editor.Toolset.CreateModTool(self, category, id, name, icon)
-	invisible_tool_panel.CreateNote("This menu does not do anything but is required for search to work in other tools.")
-	hide_mod_tool(category, name)
-
 	# If _Lib is installed then register with it
 	if Engine.has_signal("_lib_register_mod"):
 		
@@ -1402,51 +1287,33 @@ func start() -> void:
 														.fetcher(update_checker.github_fetcher("uchideshi34", "AdditionalSearchOptions"))\
 														.downloader(update_checker.github_downloader("uchideshi34", "AdditionalSearchOptions"))\
 														.build())
-	
-	# Set references to the Select Tool for later use
-	select_tool_panel = Global.Editor.Toolset.GetToolPanel("SelectTool")
-
-	# Get the reference to pattern tool panel
-	pattern_tool_panel = Global.Editor.Toolset.GetToolPanel("PatternShapeTool")
-
-	# Get the reference to wall tool panel
-	wall_tool_panel = Global.Editor.Toolset.GetToolPanel("WallTool")
-
-	# Get the reference to terrain tool panel
-	terrain_tool_panel = Global.Editor.Toolset.GetToolPanel("TerrainBrush")
-
-	# Get the reference to light tool panel
-	light_tool_panel = Global.Editor.Toolset.GetToolPanel("LightTool")
-
-	# Get the reference to roof tool panel
-	roof_tool_panel = Global.Editor.Toolset.GetToolPanel("RoofTool")
-
-	# Get the reference to portal tool panel
-	portal_tool_panel = Global.Editor.Toolset.GetToolPanel("PortalTool")
 
 	# Make the UI elements for the search capability
-	make_search_ui(pattern_tool_panel, "Patterns", "Main")
-	make_search_ui(select_tool_panel, "Patterns", "Select")
-	make_search_ui(wall_tool_panel, "Walls", "Main")
-	make_search_ui(select_tool_panel, "Walls", "Select")
-	make_search_ui(terrain_tool_panel, "Terrain", "Main")
-	make_search_ui(light_tool_panel, "Lights", "Main")
-	make_search_ui(select_tool_panel, "Lights", "Select")
-	make_search_ui(roof_tool_panel, "Roofs", "Main")
-	make_search_ui(portal_tool_panel, "Portals", "Main")
+	make_search_ui("PatternShapeTool", "main")
+	make_search_ui("PatternShapeTool", "select")
+	make_search_ui("WallTool", "main")
+	make_search_ui("WallTool", "select")
+	make_search_ui("LightTool", "main")
+	make_search_ui("LightTool", "select")
+	make_search_ui("RoofTool", "main")
+	make_search_ui("PortalTool", "main")
 
 	make_search_ui_used_objects()
 	make_search_ui_used_paths()
+
+	setup_terrain_window()
 
 	# Check for the launch of the Object or Scatter Tool and refresh the Used
 	for tool_type in ["ObjectTool","ScatterTool"]:
 		Global.Editor.Toolset.ToolPanels[tool_type].connect("visibility_changed",self, "on_toolpanel_visibility_changed",[tool_type])
 		Global.Editor.TagsPanels[tool_type].tagsList.connect("multi_selected", self, "on_tagspanel_multi_selected")
 
-	for category_type in ["Patterns", "Objects", "Paths", "Walls", "Lights", "Terrain", "Roofs", "Portals"]:
-		for tool_name in ["Main","Select"]:
-			if tool_name == "Select" && category_type in ["Terrain","Roofs","Objects","Paths"]:
+	Global.Editor.Toolset.ToolPanels["TerrainBrush"].connect("visibility_changed",self, "setup_terrain_window")
+
+	for tool_type in ["PatternShapeTool", "ObjectTool", "PathTool", "WallTool", "LightTool", "RoofTool", "PortalTool"]:
+		for location in ["main","select"]:
+			if location == "select" && tool_type in ["RoofTool","ObjectTool","PathTool"]:
 				continue
-			make_search_history_for_tool_ui(category_type, tool_name)
+			make_search_history_for_tool_ui(tool_type, location)
 	
 
