@@ -7,10 +7,19 @@ var reference_to_script = null
 var target = null
 var used_button = null
 var search_hbox = null
+var packlist = null
+
+var accept_button = null
+var cancel_button = null
+var accept_required_button = null
 
 var search_lineedit = null
 
+var store_texture_path = ""
+
 var pattern_searchable_types = ["Simple Tiles","PatternShapeTool","Patterns Colorable"]
+
+const TERRAIN_WINDOW_NAME = "ASOTerrainWindow"
 
 signal terrain_selected
 
@@ -178,15 +187,25 @@ func _init(glbl = null, ref_to_script = null):
 	var terrainwindow_template = ResourceLoader.load(global.Root + "ui/terrainwindow.tscn", "", true)
 	terrainwindow = terrainwindow_template.instance()
 	outputlog("terrainwindow: " + str(terrainwindow),1)
+	terrainwindow.name = TERRAIN_WINDOW_NAME
 	global.Editor.get_child("Windows").add_child(terrainwindow)
 	terrainwindow.connect("about_to_show", self, "_update_terrainwindow_pack_list")
-	terrainwindow.find_node("PackList").connect("item_selected", self, "_on_pack_list_item_selected")
-	terrainwindow.find_node("TextureMenu").connect("item_selected", self, "_on_terrain_item_selected")
+
+	var margins = terrainwindow.find_node("Margins")
+	var splitter = terrainwindow.find_node("Splitter")
+	packlist = terrainwindow.find_node("PackList")
+	texturemenu = terrainwindow.find_node("TextureMenu")
+
+	packlist.connect("item_selected", self, "_on_pack_list_item_selected")
+	texturemenu.connect("item_selected", self, "_on_terrain_item_selected")
+
+	var vert_vbox = VBoxContainer.new()
 
 	var vbox = VBoxContainer.new()
-	texturemenu = terrainwindow.find_node("TextureMenu")
-	terrainwindow.find_node("Splitter").remove_child(texturemenu)
-	terrainwindow.find_node("Splitter").add_child(vbox)
+	vbox.name = "ASO_VBox"
+	
+	splitter.remove_child(texturemenu)
+	splitter.add_child(vbox)
 
 	search_hbox = HBoxContainer.new()
 	search_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -210,10 +229,51 @@ func _init(glbl = null, ref_to_script = null):
 	search_hbox.add_child(search_lineedit)
 	search_hbox.add_child(used_button)
 	search_hbox.add_child(search_clearbutton)
+
+	var buttons_hbox = HBoxContainer.new()
+	var spacer_1 = HBoxContainer.new()
+	spacer_1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	buttons_hbox.add_child(spacer_1)
+
+	accept_button = Button.new()
+	accept_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	accept_button.text = "Accept"
+	accept_button.hint_tooltip = "Accept selected texture as the new one."
+	accept_button.connect("pressed",self,"hide")
+	buttons_hbox.add_child(accept_button)
+
+	accept_required_button = Button.new()
+	accept_required_button.toggle_mode = true
+	accept_required_button.icon = load_image_texture("ui/white-circle-icon.png")
+	accept_required_button.hint_tooltip = "Toggle Acceptance Required. Scrolling might be a bit odd."
+	accept_required_button.connect("toggled",self,"_on_accept_required_button_toggled")
+	accept_required_button.pressed = false
+	
+	buttons_hbox.add_child(accept_required_button)
+
+	cancel_button = Button.new()
+	cancel_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cancel_button.text = "Cancel"
+	cancel_button.hint_tooltip = "Reject selected texture and revert to previous one."
+	cancel_button.connect("pressed",self,"_on_cancel_button_pressed")
+	buttons_hbox.add_child(cancel_button)
+
+	var spacer_2 = HBoxContainer.new()
+	spacer_2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	buttons_hbox.add_child(spacer_2)
 	
 	vbox.add_child(search_hbox)
 	vbox.add_child(texturemenu)
+	margins.remove_child(splitter)
+	margins.add_child(vert_vbox)
+	vert_vbox.add_child(splitter)
+	vert_vbox.add_child(buttons_hbox)
 
+	register_mouse_wheel_events()
+	setup_trackpad_monitoring()
+	_on_accept_required_button_toggled(false)
+
+	texturemenu.connect("gui_input", self, "_on_texturemenu_gui_input")
 
 func show():
 	terrainwindow.popup_centered_ratio(0.5)
@@ -232,7 +292,44 @@ func hide():
 class MyCustomSorter:
 	static func sort_ascending_pack_name(a, b):
 		return a["pack_name"] < b["pack_name"]
+
+func _move_texturemenu_selection(dir):
+
+	outputlog("_move_texturemenu_selection: " + str(dir),2)
+
+	var selected = texturemenu.get_selected_items()
+	if selected.size() != 1: return
+
+	outputlog("sign(dir): " + str(sign(dir)))
 	
+	var selection = selected[0]
+	if selection == 0 && not sign(dir) > 0: return
+	elif selection == texturemenu.get_item_count() - 1 && sign(dir) > 0: return
+	else:
+		outputlog("target sleection: " + str(int(selection + sign(dir))))
+		texturemenu.select(int(selection + sign(dir)))
+		_on_terrain_item_selected(int(selection + sign(dir)))
+
+
+func set_target(new_target, current_texture_path: String):
+
+	outputlog("set_target: target: " + str(new_target) + " current_texture_path: " + str(current_texture_path),2)
+
+	target = new_target
+	store_texture_path = current_texture_path
+
+func _on_accept_required_button_toggled(button_pressed: bool):
+
+	accept_button.disabled = not button_pressed
+	cancel_button.disabled = not button_pressed
+
+func _on_cancel_button_pressed():
+
+	if target != null:
+		self.emit_signal("terrain_selected", target, store_texture_path)
+	
+	self.hide()
+
 func _update_terrainwindow_pack_list():
 
 	outputlog("_update_terrainwindow_pack_list",2)
@@ -256,16 +353,15 @@ func _update_terrainwindow_pack_list():
 		pack_list.push_front({"pack_id": "nativeDD", "pack_name": "Default"})
 
 	pack_list.push_front({"pack_id": "all", "pack_name": "All"})
-	var packListPath = terrainwindow.find_node("PackList")
 
-	packListPath.clear()
+	packlist.clear()
 	for pack_entry in pack_list:
-		packListPath.add_item(pack_entry["pack_name"])
-		packListPath.set_item_metadata(packListPath.get_item_count()-1,pack_entry["pack_id"])
-		packListPath.set_item_tooltip(packListPath.get_item_count()-1,pack_entry["pack_name"])
+		packlist.add_item(pack_entry["pack_name"])
+		packlist.set_item_metadata(packlist.get_item_count()-1,pack_entry["pack_id"])
+		packlist.set_item_tooltip(packlist.get_item_count()-1,pack_entry["pack_name"])
 	
-	if packListPath.get_item_count() > 0:
-		packListPath.select(0)
+	if packlist.get_item_count() > 0:
+		packlist.select(0)
 		_on_pack_list_item_selected(0)
 
 func _on_pack_list_item_selected(index: int):
@@ -278,14 +374,17 @@ func _on_terrain_item_selected(index: int):
 
 	outputlog("_on_terrain_item_selected",2)
 
+	outputlog("target: " + str(target))
+
 	if target != null:
 		outputlog("target: " + str(target),2)
 		var texture_path = texturemenu.get_item_metadata(index)
 		outputlog("texture_path: " + str(texture_path),2)
 		self.emit_signal("terrain_selected", target, texture_path)
 
-	texturemenu.clear()
-	terrainwindow.hide()
+	if not accept_required_button.pressed:
+		texturemenu.clear()
+		terrainwindow.hide()
 
 func _on_clearbutton_pressed(lineedit: LineEdit):
 
@@ -298,13 +397,13 @@ func _on_new_search_text(search_text: String):
 
 	outputlog("_on_new_search_text",2)
 
-	if terrainwindow.find_node("PackList").selected < 0: return
+	if packlist.selected < 0: return
 	texturemenu.clear()
 	
-	var selected_packs = terrainwindow.find_node("PackList").get_selected_items()
+	var selected_packs = packlist.get_selected_items()
 	var selected = 0
 	if selected_packs.size() > 0: selected = selected_packs[0]
-	var pack_id = terrainwindow.find_node("PackList").get_item_metadata(selected)
+	var pack_id = packlist.get_item_metadata(selected)
 
 	var terrain_list = reference_to_script.GetAssetList("Terrain")
 	for terrain_path in terrain_list:
@@ -429,9 +528,9 @@ func _on_used_assets_button_pressed(tool_type: String, location: String, source_
 
 	outputlog("on_used_assets_button_pressed: " + str(tool_type) + "location: " + str(location) + " source_category: " + str(source_category))
 
-	if terrainwindow.find_node("PackList").selected < 0: return
-	if terrainwindow.find_node("PackList").get_item_count() > 0:
-		terrainwindow.find_node("PackList").select(0)
+	if packlist.selected < 0: return
+	if packlist.get_item_count() > 0:
+		packlist.select(0)
 
 	search_lineedit.clear()
 	# Get a list of all possible assets in the right category
@@ -537,6 +636,86 @@ func move_item_to_top_of_popupmenu(id: int, popupmenu: PopupMenu):
 	# Write the stored values back into the array in order.
 	for _i in store_list.size():
 		popupmenu.add_item(store_list[_i])
+
+########################################################################################################
+##
+## INPUT CAPTURE FUNCTIONS
+##
+#########################################################################################################
+
+func _on_texturemenu_gui_input(event: InputEvent):
+
+	outputlog("_on_texturemenu_gui_input: " + str(event),3)
+
+	if event is InputEventMouse:
+		if Input.is_action_just_released("new_mouse_wheel_up",true):
+			_move_texturemenu_selection(-1)
+		if Input.is_action_just_released("new_mouse_wheel_down",true):
+			_move_texturemenu_selection(1)
+
+	if event is InputEventPanGesture:	
+		if trackpanmanager != null:
+			trackpanmanager.update_panning(event)	
+
+#########################################################################################################
+##
+## PAN CONTROLS FUNCTION
+##
+#########################################################################################################
+
+func _pan_event_y_direction(dir):
+
+	_move_texturemenu_selection(-dir)
+
+var trackpanmanager = null
+# Set up the trackpad monitoring class
+func setup_trackpad_monitoring():
+
+	trackpanmanager = TrackpadManager.new()
+	trackpanmanager.connect("pan_event_y_direction", self, "_pan_event_y_direction")
+
+class TrackpadManager extends Node:
+
+	var pan_value = 0.0
+	var pan_y_direction = 1
+
+	const PAN_INCREMENT = 0.5
+
+	signal pan_event_y_direction
+
+	func update_panning(event):
+		# Check if the direction is still the same
+		if -sign(event.delta.y) != pan_y_direction:
+			pan_value = 0.0
+			pan_y_direction = -sign(event.delta.y)
+		pan_value += abs(event.delta.y)
+		if pan_value > PAN_INCREMENT:
+			self.emit_signal("pan_event_y_direction", pan_y_direction)
+			pan_value = 0.0
+	
+	func reset_panning():
+		pan_value = 0.0
+		pan_y_direction = 0
+
+
+# Register the actions for mouse wheel events
+func register_mouse_wheel_events():
+
+	if not InputMap.has_action("new_mouse_wheel_up"):
+		var input_up = InputEventMouseButton.new()
+		input_up.pressed = true
+		input_up.button_index = BUTTON_WHEEL_UP
+
+		InputMap.add_action("new_mouse_wheel_up")
+		InputMap.action_add_event("new_mouse_wheel_up", input_up)
+
+	if not InputMap.has_action("new_mouse_wheel_down"):
+		var input_down = InputEventMouseButton.new()
+		input_down.pressed = true
+		input_down.button_index = BUTTON_WHEEL_DOWN
+
+		InputMap.add_action("new_mouse_wheel_down")
+		InputMap.action_add_event("new_mouse_wheel_down", input_down)
 	
 
 

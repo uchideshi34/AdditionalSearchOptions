@@ -714,6 +714,79 @@ func on_set_terrain_slot_button_pressed():
 			# Set the texture on the map itself
 			Global.World.GetCurrentLevel().Terrain.SetTexture(texture, index)
 
+var rh_panel = null
+var rh_panel_box = null
+
+# Function to move the terrain to the rh_panel - Note this can only be called when _Lib is active
+func _move_terrain_search(use_rh_panel: bool):
+
+	if use_rh_panel:
+		if rh_panel == null: setup_rh_panel()
+		ui_config["TerrainBrush"]["main"]["section"].get_parent().remove_child(ui_config["TerrainBrush"]["main"]["section"])
+		rh_panel.add_child(ui_config["TerrainBrush"]["main"]["section"])
+	else:
+		ui_config["TerrainBrush"]["main"]["section"].get_parent().remove_child(ui_config["TerrainBrush"]["main"]["section"])
+		Global.Editor.Toolset.GetToolPanel("TerrainBrush").Align.add_child(ui_config["TerrainBrush"]["main"]["section"])
+
+	rh_panel.visible = use_rh_panel && Global.Editor.Toolset.GetToolPanel("TerrainBrush").visible && _lib_mod_config.enable_terrain_search_in_toolpanel
+
+# Sets up the UI for our tree to live in
+func setup_rh_panel():
+
+	outputlog("setup_rh_panel",2)
+	# The PanelContainer styling is a bit of a mystery to me - the below is the result of a lot of
+	# trial and error.
+	rh_panel = PanelContainer.new()
+	Global.Editor.get_node("VPartition/Panels").add_child(rh_panel)
+
+	# Hacky way of doing hidpi scaling. Can't get anchors to work with the current parent node.
+	var scale_factor = OS.get_screen_dpi() / 96.0
+
+	rh_panel.set_custom_minimum_size(Vector2(300.0 * scale_factor, 0))
+
+	# Overrides the theme background (which is a light grey) with translucent black.
+	var sb = StyleBoxFlat.new()
+	sb.set_bg_color(Color(0, 0, 0, 0.4))
+
+	rh_panel.add_stylebox_override("panel", sb)
+	var sub_hbox = HBoxContainer.new()
+	rh_panel.add_child(sub_hbox)
+	sub_hbox.set_h_size_flags(3)
+	sub_hbox.set_v_size_flags(3)
+
+	var resize_vbox = VBoxContainer.new()
+	resize_vbox.rect_min_size = Vector2(5,0)
+	resize_vbox.mouse_default_cursor_shape = Control.CURSOR_HSIZE
+	resize_vbox.connect("gui_input", self, "on_panel_size_drag_management", [rh_panel])
+	sub_hbox.add_child(resize_vbox)
+
+	# Container that fills the panel
+	var box = VBoxContainer.new()
+	box.set_h_size_flags(3)
+	box.set_v_size_flags(3)
+
+	# Text label. Should probably make it bold or something, but I don't have the will...
+	var label = Label.new()
+	label.set_text("Terrain Search")
+	var dynamic_font = DynamicFont.new()
+	dynamic_font = load("res://ui/fonts/PanelHeadingFont.tres")
+	dynamic_font.size = 48
+	label.add_font_override("font", dynamic_font)
+	box.add_child(label)
+	rh_panel_box = box
+
+# Function to respond when panel drag is active
+func on_panel_size_drag_management(event: InputEvent, panel):
+
+	outputlog("on_panel_size_drag_management",2)
+
+	if Input.is_mouse_button_pressed(BUTTON_LEFT):
+		var scale_factor = OS.get_screen_dpi() / 96.0
+		var min_x_size = 300.0 * scale_factor
+		var local_mouse_pos = panel.get_local_mouse_position()
+		if Global.Editor.content.rect_size.x > 60 || local_mouse_pos.x > 0.0:
+			panel.set_custom_minimum_size(Vector2(max(panel.get_custom_minimum_size().x-local_mouse_pos.x,min_x_size),0))
+
 #########################################################################################################
 ##
 ## UI DRIVEN FUNCTIONS
@@ -1047,6 +1120,11 @@ func setup_terrain_window():
 		Global.Editor.Toolset.GetToolPanel("TerrainBrush").connect("visibility_changed", self, "_connect_to_terrain_buttons",[null, 0.1])
 		Global.Editor.Tools["TerrainBrush"].Controls["ExpandSlotsButton"].connect("toggled", self, "_connect_to_terrain_buttons",[0.1])
 		terrainwindowui.make_search_history_ui()
+	
+	# Hide the rh_panel if it exists
+	if rh_panel != null:
+		rh_panel.visible = Global.Editor.Toolset.GetToolPanel("TerrainBrush").visible
+	
 
 func _connect_to_terrain_buttons(_ignore_this, delay: float = 0.1):
 
@@ -1071,7 +1149,12 @@ func _connect_to_terrain_buttons(_ignore_this, delay: float = 0.1):
 
 func _on_terrain_selection_button_pressed(index: int):
 
-	terrainwindowui.target = index
+	outputlog("_on_terrain_selection_button_pressed: " + str(index),2)
+
+	var texture_path = Global.World.GetCurrentLevel().Terrain.textures[index].resource_path
+	outputlog("texture_path: "  + str(texture_path))
+	terrainwindowui.set_target(index, texture_path)
+
 	if Global.Editor.Windows["TerrainWindow"].visible:
 		Global.Editor.Windows["TerrainWindow"].visible = false
 		terrainwindowui.show()
@@ -1238,7 +1321,9 @@ func on_preferences_apply_pressed():
 	
 	max_history_search_terms = int(_lib_mod_config.search_entries_slider)
 	logging_level = int(_lib_mod_config.core_log_level)
-
+	_move_terrain_search(_lib_mod_config.enable_terrain_rh_panel)
+	ui_config["TerrainBrush"]["main"]["section"].visible = _lib_mod_config.enable_terrain_search_in_toolpanel
+	
 	Global.Editor.get_node("Windows").remove_child(timer)
 	timer.queue_free()
 
@@ -1306,6 +1391,8 @@ func start() -> void:
 		_lib_config_builder\
 			.check_button("search_on_text_changed", true, "Enable search on any text changed without requiring carriage return.")\
 			.check_button("refresh_grid_colours", false, "Refresh the wall and pattern colours in the grid when searching.")\
+			.check_button("enable_terrain_rh_panel", false, "Enable Terrain Search on Right Hand Panel.")\
+			.check_button("enable_terrain_search_in_toolpanel", true, "Enable Terrain Search in the Tool Panel.")\
 			.h_box_container().enter()\
 				.label("Max Search Entries: ")\
 				.label().ref("slider_label")\
@@ -1369,5 +1456,9 @@ func start() -> void:
 			if location == "select" && tool_type in ["RoofTool","ObjectTool","PathTool","TerrainBrush"]:
 				continue
 			make_search_history_for_tool_ui(tool_type, location)
+	
+	on_preferences_apply_pressed()
+
+	
 	
 
