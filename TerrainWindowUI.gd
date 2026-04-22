@@ -648,9 +648,9 @@ func _on_texturemenu_gui_input(event: InputEvent):
 	outputlog("_on_texturemenu_gui_input: " + str(event),3)
 
 	if event is InputEventMouse:
-		if Input.is_action_just_released("new_mouse_wheel_up",true):
+		if Input.is_action_just_released("new_mouse_wheel_up",true) && Input.is_key_pressed(KEY_SHIFT):
 			_move_texturemenu_selection(-1)
-		if Input.is_action_just_released("new_mouse_wheel_down",true):
+		if Input.is_action_just_released("new_mouse_wheel_down",true) && Input.is_key_pressed(KEY_SHIFT):
 			_move_texturemenu_selection(1)
 
 	if event is InputEventPanGesture:	
@@ -665,7 +665,9 @@ func _on_texturemenu_gui_input(event: InputEvent):
 
 func _pan_event_y_direction(dir):
 
-	_move_texturemenu_selection(-dir)
+	if Input.is_key_pressed(KEY_SHIFT):
+
+		_move_texturemenu_selection(-dir)
 
 var trackpanmanager = null
 # Set up the trackpad monitoring class
