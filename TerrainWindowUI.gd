@@ -25,7 +25,7 @@ signal terrain_selected
 
 # Logging functions
 const ENABLE_LOGGING = true
-const LOGGING_LEVEL = 2
+const LOGGING_LEVEL = 0
 
 #########################################################################################################
 ##
