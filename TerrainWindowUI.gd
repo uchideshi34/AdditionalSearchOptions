@@ -648,9 +648,9 @@ func _on_texturemenu_gui_input(event: InputEvent):
 	outputlog("_on_texturemenu_gui_input: " + str(event),3)
 
 	if event is InputEventMouse:
-		if Input.is_action_just_released("new_mouse_wheel_up",true) && Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_action_just_released("shift_and_mousewheel_up",true):
 			_move_texturemenu_selection(-1)
-		if Input.is_action_just_released("new_mouse_wheel_down",true) && Input.is_key_pressed(KEY_SHIFT):
+		if Input.is_action_just_released("shift_and_mousewheel_down",true):
 			_move_texturemenu_selection(1)
 
 	if event is InputEventPanGesture:	
@@ -703,21 +703,23 @@ class TrackpadManager extends Node:
 # Register the actions for mouse wheel events
 func register_mouse_wheel_events():
 
-	if not InputMap.has_action("new_mouse_wheel_up"):
+	if not InputMap.has_action("shift_and_mousewheel_up"):
 		var input_up = InputEventMouseButton.new()
 		input_up.pressed = true
 		input_up.button_index = BUTTON_WHEEL_UP
+		input_up.shift = true
 
-		InputMap.add_action("new_mouse_wheel_up")
-		InputMap.action_add_event("new_mouse_wheel_up", input_up)
+		InputMap.add_action("shift_and_mousewheel_up")
+		InputMap.action_add_event("shift_and_mousewheel_up", input_up)
 
-	if not InputMap.has_action("new_mouse_wheel_down"):
+	if not InputMap.has_action("shift_and_mousewheel_down"):
 		var input_down = InputEventMouseButton.new()
 		input_down.pressed = true
 		input_down.button_index = BUTTON_WHEEL_DOWN
+		input_down.shift = true
 
-		InputMap.add_action("new_mouse_wheel_down")
-		InputMap.action_add_event("new_mouse_wheel_down", input_down)
+		InputMap.add_action("shift_and_mousewheel_down")
+		InputMap.action_add_event("shift_and_mousewheel_down", input_down)
 	
 
 
