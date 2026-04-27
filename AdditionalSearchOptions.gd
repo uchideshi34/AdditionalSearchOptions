@@ -3,8 +3,8 @@ var script_class = "tool"
 
 # Variables
 var ui_config: Dictionary
-var pattern_types = ["All","Simple Tiles","PatternShapeTool","Patterns Colorable"]
-var pattern_searchable_types = ["Simple Tiles","PatternShapeTool","Patterns Colorable"]
+var pattern_types = ["All","Simple Tiles","Patterns","Patterns Colorable"]
+var pattern_searchable_types = ["Simple Tiles","Patterns","Patterns Colorable"]
 var _lib_mod_config
 var terrainwindowui = null
 
