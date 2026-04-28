@@ -206,6 +206,37 @@ func load_runtime_image(path: String) -> Texture:
 	tex.create_from_image(img)
 	return tex
 
+func record_time(time_data: Dictionary, time_point_string: String):
+
+	if time_data.keys().size() == 0:
+		time_data["start"] = OS.get_ticks_msec()
+	else:
+		time_data[time_point_string] = OS.get_ticks_msec()
+
+func sort_time_data(a: Dictionary, b: Dictionary):
+
+	return a["time"] < b["time"]
+
+func outputlog_time_data(time_data: Dictionary, title: String = ""):
+
+	outputlog("",2)
+	outputlog("outputlog_time_data: " + str(title),2)
+	outputlog("-------------------",2)
+
+	if time_data.keys().size() < 2: return
+
+	var time_list = []
+	for _i in range(0,time_data.keys().size(),1):
+		time_list.append({"time": time_data[time_data.keys()[_i]], "name": time_data.keys()[_i]})
+
+	# Order them correctly
+	time_list.sort_custom(self, "sort_time_data")
+	
+	for _i in range(1,time_list.size(),1):
+		outputlog(time_list[_i]["name"] + " : " + str(time_list[_i]["time"]-time_list[_i-1]["time"]))
+	
+	outputlog("-------------------\n",2)
+
 
 #########################################################################################################
 ##
@@ -330,6 +361,8 @@ func on_new_search_text(search_text: String, tool_type: String, location: String
 	var thumbnail_url
 
 	outputlog("on_new_search_text: " + str(search_text) + " tool_type: " + str(tool_type) + " location: " + str(location),2)
+	var time_data = {}
+	record_time(time_data, "start")
 
 	# If we have installed _Lib check for the search_on_text_changed status
 	if Engine.has_signal("_lib_register_mod"):
@@ -351,23 +384,25 @@ func on_new_search_text(search_text: String, tool_type: String, location: String
 		
 		# Load all categories and capture Lookup after each Load to build a complete index-to-path mapping
 		# (Lookup only contains the last-loaded category's entries, so we must capture after each Load)
-		var all_index_to_path = {}
 		for _i in range(pattern_searchable_types.size()):
 			grid_menu.Load(pattern_searchable_types[_i])
+			record_time(time_data, "load: " + str(pattern_searchable_types[_i]))
 			if _i == 0:
 				grid_menu.Reset()
-			for resource_path in grid_menu.Lookup.keys():
-				all_index_to_path[grid_menu.Lookup[resource_path]] = resource_path
+		var temp_pattern_list = grid_menu.Lookup.keys().duplicate()
+		record_time(time_data, "duplicate keys")
 		# Remove non-matching items directly from the ItemList (iterate in reverse to preserve indices)
-		for idx in range(grid_menu.get_item_count() - 1, -1, -1):
-			if all_index_to_path.has(idx):
-				result = all_index_to_path[idx].split("/")[-1].split(".")[0].to_lower()
-				if not is_valid_search_result(result, search_text):
-					grid_menu.remove_item(idx)
-			else:
+		for idx in range(temp_pattern_list.size() - 1, -1, -1):
+			var resource_path = temp_pattern_list[idx]
+			result = resource_path.split("/")[-1].split(".")[0].to_lower()
+			if not is_valid_search_result(result, search_text):
 				grid_menu.remove_item(idx)
+
+		record_time(time_data, "remove non-matching items")
 		outputlog("search results size (All): " + str(grid_menu.get_item_count()),2)
 		refresh_colours_in_grid_menu(tool_type,location)
+		record_time(time_data, "refresh_colours_in_grid_menu")
+		outputlog_time_data(time_data, "on_new_search_text")
 		return
 	
 	# Get a list of all possible assets in the right category
@@ -426,6 +461,8 @@ func on_used_assets_button_pressed(tool_type: String, location: String, source_c
 	var grid_menu = ui_config[tool_type][location]["grid_menu"]
 	var category: String
 	var thumbnail_url
+	var time_data = {}
+	record_time(time_data, "start")
 
 	outputlog("on_used_assets_button_pressed: " + str(tool_type) + "location: " + str(location) + " source_category: " + str(source_category))
 
@@ -438,26 +475,28 @@ func on_used_assets_button_pressed(tool_type: String, location: String, source_c
 	if tool_type == "PatternShapeTool":
 		# Set the category according to the drop down selection
 		# Load all categories and capture Lookup after each Load
-		var all_index_to_path = {}
 		for _i in range(pattern_searchable_types.size()):
 			grid_menu.Load(pattern_searchable_types[_i])
+			record_time(time_data, "load: " + str(pattern_searchable_types[_i]))
 			if _i == 0:
 				grid_menu.Reset()
-			for resource_path in grid_menu.Lookup.keys():
-				all_index_to_path[grid_menu.Lookup[resource_path]] = resource_path
-		# Gather used assets from all searchable pattern categories
-		var used_paths = {}
-		for searchable_category in pattern_searchable_types:
-			for asset_path in find_assets_used_in_map(tool_type, source_category, 0):
-				used_paths[asset_path] = true
-		# Remove items that are NOT used (iterate in reverse to preserve indices)
-		for idx in range(grid_menu.get_item_count() - 1, -1, -1):
-			if all_index_to_path.has(idx):
-				if not used_paths.has(all_index_to_path[idx]):
-					grid_menu.remove_item(idx)
-			else:
+		var temp_pattern_list = grid_menu.Lookup.keys().duplicate()
+		record_time(time_data, "duplicate keys")
+
+		var used_patterns = find_assets_used_in_map(tool_type, source_category, 0)
+		record_time(time_data, "find_assets_used_in_map")
+		
+		# Remove non-matching items directly from the ItemList (iterate in reverse to preserve indices)
+		for idx in range(temp_pattern_list.size() - 1, -1, -1):
+			var resource_path = temp_pattern_list[idx]
+			if not resource_path in used_patterns:
 				grid_menu.remove_item(idx)
+
+		record_time(time_data, "remove non-matching items")
+		outputlog("search results size (All): " + str(grid_menu.get_item_count()),2)
 		refresh_colours_in_grid_menu(tool_type,location)
+		record_time(time_data, "refresh_colours_in_grid_menu")
+		outputlog_time_data(time_data, "on_new_search_text")
 		return
 
 	# Get a list of all possible assets in the right category
