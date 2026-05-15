@@ -1151,7 +1151,7 @@ func make_search_ui_used_objects():
 func setup_terrain_window():
 
 	outputlog("setup_terrain_window")
-
+	
 	if terrainwindowui == null:
 		var TerrainWindowUI = ResourceLoader.load(Global.Root + "TerrainWindowUI.gd", "GDScript", true)
 		terrainwindowui = TerrainWindowUI.new(Global, Script)
@@ -1168,6 +1168,9 @@ func setup_terrain_window():
 func _connect_to_terrain_buttons(_ignore_this, delay: float = 0.1):
 
 	outputlog("_connect_to_terrain_buttons",2)
+
+	if not Global.Editor.Tools["TerrainBrush"].has("terrainButtonBox"): return
+	if Global.Editor.Tools["TerrainBrush"].terrainButtonBox == null: return
 
 	var timer = Timer.new()
 	timer.autostart = false

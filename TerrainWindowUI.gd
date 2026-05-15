@@ -1,5 +1,3 @@
-class_name TerrainWindowUI
-
 var global = null
 var terrainwindow = null
 var texturemenu = null
