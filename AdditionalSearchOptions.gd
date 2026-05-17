@@ -485,6 +485,8 @@ func on_used_assets_button_pressed(tool_type: String, location: String, source_c
 
 		var used_patterns = find_assets_used_in_map(tool_type, source_category, 0)
 		record_time(time_data, "find_assets_used_in_map")
+
+		outputlog("used_patterns: " + str(used_patterns),2)
 		
 		# Remove non-matching items directly from the ItemList (iterate in reverse to preserve indices)
 		for idx in range(temp_pattern_list.size() - 1, -1, -1):
@@ -496,7 +498,7 @@ func on_used_assets_button_pressed(tool_type: String, location: String, source_c
 		outputlog("search results size (All): " + str(grid_menu.get_item_count()),2)
 		refresh_colours_in_grid_menu(tool_type,location)
 		record_time(time_data, "refresh_colours_in_grid_menu")
-		outputlog_time_data(time_data, "on_new_search_text")
+		outputlog_time_data(time_data, "on_used_assets_button_pressed")
 		return
 
 	# Get a list of all possible assets in the right category
@@ -604,7 +606,7 @@ func find_assets_used_in_map(tool_type: String, source_category: String, sort_ty
 	var array_of_texture_paths = []
 	var url_match_array = {
 		"Simple Tiles": "tilesets/simple/",
-		"PatternShapeTool": "patterns/normal/",
+		"Patterns": "patterns/normal/",
 		"Patterns Colorable": "patterns/colorable/",
 		"TerrainBrush": "terrain/",
 		"LightTool": "lights/",
@@ -706,12 +708,14 @@ func find_assets_used_in_map(tool_type: String, source_category: String, sort_ty
 		var copy_of_array = array_of_texture_paths.duplicate()
 		# Clear the destination array which will be rebuilt with terrain texture paths
 		array_of_texture_paths.clear()
+		outputlog("copy_of_array: " + str(copy_of_array),2)
 		# For each (now unique) pattern resource path, look for a matching and validate terrain resource path
 		for texture_resource_path in copy_of_array:
 			# Extract the dictionary of resource data {"texture_name": texture_name,"pack_name": pack_name, "pack_id": pack_id}
 			resource_path_data = find_texture_name_and_pack(texture_resource_path)
 			# Construct a potential resource path for the matching terrain asset
 			temp_resource_path = "res://packs/" + resource_path_data["pack_id"] + "/textures/" + url_match_array[tool_type] + resource_path_data["texture_name"] + "." + texture_resource_path.split(".")[1]
+			outputlog("temp_resource_path: " + str(temp_resource_path),2)
 			# If there exists a thumbnail file for this path then add the url of the resource path to the array of textures. Not sure why I can't directly use ResourceLoader on the file itself!
 			thumbnail_url = find_thumbnail_url(temp_resource_path)
 			if thumbnail_url != null:
@@ -1164,13 +1168,9 @@ func setup_terrain_window():
 	if rh_panel != null:
 		rh_panel.visible = Global.Editor.Toolset.GetToolPanel("TerrainBrush").visible
 	
-
 func _connect_to_terrain_buttons(_ignore_this, delay: float = 0.1):
 
 	outputlog("_connect_to_terrain_buttons",2)
-
-	if not Global.Editor.Tools["TerrainBrush"].has("terrainButtonBox"): return
-	if Global.Editor.Tools["TerrainBrush"].terrainButtonBox == null: return
 
 	var timer = Timer.new()
 	timer.autostart = false
@@ -1179,6 +1179,8 @@ func _connect_to_terrain_buttons(_ignore_this, delay: float = 0.1):
 	timer.start(delay)
 
 	yield(timer,"timeout")
+
+	if Global.Editor.Tools["TerrainBrush"].terrainButtonBox == null: return
 
 	var buttons = Global.Editor.Tools["TerrainBrush"].terrainButtonBox.get_children()
 
@@ -1207,9 +1209,6 @@ func _on_terrain_selected(target: int, texture_path: String):
 
 	var texture = safe_load_texture(texture_path)
 	Global.Editor.Tools["TerrainBrush"].SetTextureFromWindow(texture, target)
-
-
-
 
 #########################################################################################################
 ##
